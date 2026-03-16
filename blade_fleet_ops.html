@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLADE Fleet Ops — Live Tail Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: #060a10; color: #c8d6e5; min-height: 100vh; padding: 20px; }
+
+  .dash { max-width: 1400px; margin: 0 auto; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid #1e2d3d; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .blade-logo { font-family: 'Space Mono', monospace; font-size: 14px; font-weight: 700; color: #00e5ff; letter-spacing: 4px; }
+  .dash-title { font-size: 12px; color: #4a6278; letter-spacing: 1px; text-transform: uppercase; font-weight: 500; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .live-dot { width: 8px; height: 8px; background: #00e5ff; border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .last-updated { font-family: 'Space Mono', monospace; font-size: 11px; color: #4a6278; }
+  .refresh-btn { background: #1e2d3d; border: 1px solid #2a3f55; color: #00e5ff; font-family: 'Space Mono', monospace; font-size: 11px; padding: 6px 14px; border-radius: 4px; cursor: pointer; letter-spacing: 1px; }
+  .refresh-btn:hover { background: #243444; }
+  .auto-label { font-size: 11px; color: #2a3f55; font-family: 'Space Mono', monospace; }
+
+  .stats-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+  .stat-card { background: #0e1821; border: 1px solid #1e2d3d; border-radius: 10px; padding: 12px 16px; text-align: center; }
+  .stat-label { font-size: 10px; color: #4a6278; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 5px; }
+  .stat-value { font-family: 'Space Mono', monospace; font-size: 26px; font-weight: 700; color: #c8d6e5; }
+  .stat-value.cyan { color: #00e5ff; }
+  .stat-value.yellow { color: #ffc947; }
+  .stat-value.red { color: #ff4f5e; }
+  .stat-value.green { color: #4cff91; }
+
+  .events-section { margin-bottom: 18px; }
+  .section-label { font-family: 'Space Mono', monospace; font-size: 10px; color: #4a6278; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: #1e2d3d; }
+
+  .events-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+  .events-list::-webkit-scrollbar { width: 4px; }
+  .events-list::-webkit-scrollbar-track { background: #0e1821; }
+  .events-list::-webkit-scrollbar-thumb { background: #1e2d3d; border-radius: 2px; }
+
+  .event-card { background: #0e1821; border: 1px solid #1e2d3d; border-radius: 6px; padding: 10px 16px; display: flex; align-items: center; gap: 14px; }
+  .event-card.departed { border-left: 3px solid #ff8c42; }
+  .event-card.arrived  { border-left: 3px solid #4cff91; }
+  .event-type { font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 1px; min-width: 75px; }
+  .event-type.dep { color: #ff8c42; }
+  .event-type.arr { color: #4cff91; }
+  .event-reg  { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700; color: #00e5ff; min-width: 70px; }
+  .event-loc  { font-size: 13px; color: #9fb3c8; flex: 1; }
+  .event-detail { font-size: 11px; color: #4a6278; font-family: 'Space Mono', monospace; }
+  .event-time { font-family: 'Space Mono', monospace; font-size: 10px; color: #2a3f55; min-width: 60px; text-align: right; }
+  .no-events { font-size: 12px; color: #2a3f55; font-family: 'Space Mono', monospace; padding: 20px; text-align: center; }
+
+  .filter-bar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+  .filter-input { background: #0e1821; border: 1px solid #1e2d3d; color: #c8d6e5; font-family: 'Space Mono', monospace; font-size: 12px; padding: 7px 14px; border-radius: 4px; flex: 1; outline: none; }
+  .filter-input::placeholder { color: #2a3f55; }
+  .filter-input:focus { border-color: #00e5ff33; }
+  .filter-btn { background: #0e1821; border: 1px solid #1e2d3d; color: #4a6278; font-size: 11px; padding: 7px 12px; border-radius: 4px; cursor: pointer; white-space: nowrap; font-family: 'Space Mono', monospace; }
+  .filter-btn.active { border-color: #00e5ff44; color: #00e5ff; background: #0a1a26; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid #1e2d3d; border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 900px; }
+  thead { background: #0c1620; position: sticky; top: 0; z-index: 1; }
+  th { font-family: 'Space Mono', monospace; font-size: 10px; font-weight: 400; color: #4a6278; letter-spacing: 1px; text-transform: uppercase; padding: 10px 12px; text-align: left; border-bottom: 1px solid #1e2d3d; cursor: pointer; white-space: nowrap; user-select: none; }
+  th:hover { color: #9fb3c8; }
+  tr.data-row { border-bottom: 1px solid #0d1a25; transition: background 0.12s; }
+  tr.data-row:hover { background: #0e1821; }
+  td { padding: 9px 12px; white-space: nowrap; font-family: 'Space Mono', monospace; font-size: 11px; color: #c8d6e5; }
+
+  .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; }
+  .status-airborne { background: #00e5ff; box-shadow: 0 0 8px #00e5ff55; animation: pulse 2s infinite; }
+  .status-ground   { background: #ffc947; }
+  .status-stale    { background: #ff4f5e; }
+  .status-cell { display: flex; align-items: center; }
+
+  .reg { color: #00e5ff; font-weight: 700; letter-spacing: 1px; }
+  .callsign { color: #9fb3c8; }
+  .type-code { color: #4a6278; }
+  .pos-val { color: #4a6278; font-size: 10px; }
+  .seen-stale { color: #ff4f5e; }
+  .seen-ok { color: #4a6278; }
+  .vert-up { color: #00e5ff; }
+  .vert-dn { color: #ffc947; }
+  .prox-badge { display: inline-block; font-size: 9px; background: #00e5ff18; color: #00e5ff; border: 1px solid #00e5ff33; border-radius: 3px; padding: 1px 5px; margin-left: 5px; letter-spacing: 0.5px; }
+  .at-badge   { display: inline-block; font-size: 9px; background: #4cff9118; color: #4cff91; border: 1px solid #4cff9133; border-radius: 3px; padding: 1px 5px; margin-left: 5px; }
+  .adsbx-link { font-size: 11px; color: #2a3f55; text-decoration: none; }
+  .adsbx-link:hover { color: #00e5ff; }
+  .loading-msg { text-align: center; padding: 40px; font-family: 'Space Mono', monospace; font-size: 13px; color: #2a3f55; }
+  .error-msg { text-align: center; padding: 24px; color: #ff4f5e; font-size: 12px; font-family: 'Space Mono', monospace; }
+
+  .footer { margin-top: 16px; text-align: center; font-family: 'Space Mono', monospace; font-size: 10px; color: #1e2d3d; }
+</style>
+</head>
+<body>
+<div class="dash">
+
+  <div class="header">
+    <div class="header-left">
+      <span class="blade-logo">BLADE</span>
+      <span style="color:#1e2d3d; font-size:18px">|</span>
+      <span class="dash-title">Fleet Ops — Live Tail Tracker</span>
+    </div>
+    <div class="header-right">
+      <span class="auto-label">Auto-refresh: 60s</span>
+      <div class="live-dot"></div>
+      <span class="last-updated" id="last-updated">—</span>
+      <button class="refresh-btn" onclick="loadData()">↺ REFRESH</button>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat-card"><div class="stat-label">Total Tails</div><div class="stat-value" id="stat-total">—</div></div>
+    <div class="stat-card"><div class="stat-label">Airborne</div><div class="stat-value cyan" id="stat-airborne">—</div></div>
+    <div class="stat-card"><div class="stat-label">On Ground</div><div class="stat-value yellow" id="stat-ground">—</div></div>
+    <div class="stat-card"><div class="stat-label">No Signal</div><div class="stat-value red" id="stat-stale">—</div></div>
+    <div class="stat-card"><div class="stat-label">At Helipad / Airport</div><div class="stat-value green" id="stat-prox">—</div></div>
+  </div>
+
+  <div class="events-section">
+    <div class="section-label">Depart / Arrive Events</div>
+    <div class="events-list" id="events-list">
+      <div class="no-events">Waiting for first sweep...</div>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <input class="filter-input" id="search-box" placeholder="Search reg, callsign, type, location..." oninput="renderTable()">
+    <button class="filter-btn active" id="btn-all"      onclick="setFilter('all')">All</button>
+    <button class="filter-btn"        id="btn-airborne" onclick="setFilter('airborne')">Airborne</button>
+    <button class="filter-btn"        id="btn-ground"   onclick="setFilter('ground')">On Ground</button>
+    <button class="filter-btn"        id="btn-prox"     onclick="setFilter('prox')">At Helipad</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th onclick="sortBy('status')">Status</th>
+          <th onclick="sortBy('r')">Reg</th>
+          <th onclick="sortBy('flight')">Callsign</th>
+          <th onclick="sortBy('t')">Type</th>
+          <th onclick="sortBy('alt_baro')">Altitude</th>
+          <th onclick="sortBy('gs')">GS (kt)</th>
+          <th onclick="sortBy('baro_rate')">Vert Rate</th>
+          <th>Squawk</th>
+          <th onclick="sortBy('nearestName')">Nearest Location</th>
+          <th onclick="sortBy('nearestDist')">Distance</th>
+          <th onclick="sortBy('seen')">Seen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="12" class="loading-msg">Initializing radar sweep...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">Data: opendata.adsb.fi · Refreshes every 60s · BLADE Ground Connect Ops</div>
+</div>
+
+<script>
+const ICAOS = [
+  'acbcfd','a81624','ac1dbc','a928da','aa8548','a46819','a97c2e','a81f62',
+  'aa4414','aaea23','aa83e8','a20372','a4caee','a4d375','a46bd0','a5e880',
+  'a4b1e8','ae6a8a','a2a484','a98020','ab2ae6','a3b8e8','a2bd59','a04014',
+  'a0e20b','ab7da4','a25fcd','a28402','a0de49','ae4a89','a7fe65','a45915',
+  'a96eeb','a5818b'
+];
+
+const LOCATIONS = [
+  { id:'DCA',  name:'Downtown Manhattan HP',   lat:40.6892, lon:-74.0445, type:'helipad' },
+  { id:'E34',  name:'East 34th St Heliport',   lat:40.7425, lon:-73.9718, type:'helipad' },
+  { id:'W30',  name:'West 30th St Heliport',   lat:40.7494, lon:-74.0026, type:'helipad' },
+  { id:'TEB',  name:'Teterboro (TEB)',          lat:40.8501, lon:-74.0608, type:'airport' },
+  { id:'HPN',  name:'Westchester (HPN)',        lat:41.0670, lon:-73.7076, type:'airport' },
+  { id:'JFK',  name:'JFK International',        lat:40.6413, lon:-73.7781, type:'airport' },
+  { id:'EWR',  name:'Newark (EWR)',             lat:40.6895, lon:-74.1745, type:'airport' },
+  { id:'LGA',  name:'LaGuardia (LGA)',          lat:40.7769, lon:-73.8740, type:'airport' },
+  { id:'BED',  name:'Bedford (BED)',            lat:42.4700, lon:-71.2893, type:'airport' },
+  { id:'FRG',  name:'Republic (FRG)',           lat:40.7288, lon:-73.4134, type:'airport' },
+  { id:'HTO',  name:'East Hampton (HTO)',       lat:40.9598, lon:-72.2518, type:'airport' },
+  { id:'MTP',  name:'Montauk (MTP)',            lat:41.0765, lon:-71.9208, type:'airport' },
+  { id:'SWF',  name:'Stewart (SWF)',            lat:41.5041, lon:-74.1048, type:'airport' },
+  { id:'ACY',  name:'Atlantic City (ACY)',      lat:39.4576, lon:-74.5772, type:'airport' },
+  { id:'PVD',  name:'Providence (PVD)',         lat:41.7240, lon:-71.4283, type:'airport' },
+  { id:'BOS',  name:'Boston Logan (BOS)',       lat:42.3656, lon:-71.0096, type:'airport' },
+  { id:'PHL',  name:'Philadelphia (PHL)',       lat:39.8729, lon:-75.2437, type:'airport' },
+  { id:'IAD',  name:'Dulles (IAD)',             lat:38.9531, lon:-77.4565, type:'airport' },
+  { id:'MIA',  name:'Miami (MIA)',              lat:25.7959, lon:-80.2870, type:'airport' },
+  { id:'PBI',  name:'Palm Beach (PBI)',         lat:26.6832, lon:-80.0956, type:'airport' },
+  { id:'HYA',  name:'Hyannis (HYA)',            lat:41.6693, lon:-70.2803, type:'airport' },
+  { id:'ACK',  name:'Nantucket (ACK)',          lat:41.2531, lon:-70.0602, type:'airport' },
+  { id:'MVY',  name:"Martha's Vineyard (MVY)", lat:41.3931, lon:-70.6154, type:'airport' },
+  { id:'LWM',  name:'Lawrence (LWM)',           lat:42.7172, lon:-71.1233, type:'airport' },
+];
+
+const PROX_NM = 2.0;
+const EVENT_ALT_FT = 500;
+
+function haversineNm(la1, lo1, la2, lo2) {
+  const R = 3440.065, r = Math.PI/180;
+  const dLa = (la2-la1)*r, dLo = (lo2-lo1)*r;
+  const a = Math.sin(dLa/2)**2 + Math.cos(la1*r)*Math.cos(la2*r)*Math.sin(dLo/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function nearestLoc(lat, lon) {
+  if (lat==null||lon==null) return null;
+  let best=null, bd=Infinity;
+  for (const L of LOCATIONS) {
+    const d = haversineNm(lat, lon, L.lat, L.lon);
+    if (d < bd) { bd=d; best=L; }
+  }
+  return { loc:best, dist:bd };
+}
+
+let allData=[], prevStates={}, events=[];
+let currentFilter='all', sortKey='status', sortAsc=true;
+
+function getStatus(ac) {
+  if (!ac.lat || ac.seen>120) return 'stale';
+  if (ac.alt_baro==='ground') return 'ground';
+  if (typeof ac.alt_baro==='number' && ac.alt_baro>0) return 'airborne';
+  if (ac.gs>30) return 'airborne';
+  return 'ground';
+}
+function statusOrder(s){ return s==='airborne'?0:s==='ground'?1:s==='stale'?2:3; }
+
+function fmt(v){ return v==null?'—':Math.round(v).toLocaleString(); }
+function fmtAlt(ac){
+  if (ac.alt_baro==='ground') return 'Ground';
+  if (typeof ac.alt_baro==='number') return fmt(ac.alt_baro)+' ft';
+  return '—';
+}
+function fmtVR(ac){
+  if (ac.baro_rate==null) return '—';
+  const r=Math.round(ac.baro_rate);
+  if (r>100) return '<span class="vert-up">▲ '+fmt(r)+' fpm</span>';
+  if (r<-100) return '<span class="vert-dn">▼ '+fmt(Math.abs(r))+' fpm</span>';
+  return '<span style="color:#4a6278">Level</span>';
+}
+function fmtSeen(s){
+  if (s==null) return '—';
+  const sec=Math.round(s);
+  return sec<60 ? sec+'s' : Math.floor(sec/60)+'m '+(sec%60)+'s';
+}
+function nowTime(){ return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+function detectEvents(ac, status, nearest) {
+  const hex=ac.hex, reg=(ac.r||hex.toUpperCase()).trim();
+  const prev=prevStates[hex];
+  const isNear=nearest&&nearest.dist<=PROX_NM;
+  const alt=typeof ac.alt_baro==='number'?ac.alt_baro:(ac.alt_baro==='ground'?0:null);
+  if (!prev) return;
+  const prevIsNear=prev.nearest&&prev.nearest.dist<=PROX_NM;
+
+  if (prev.status==='ground' && status==='airborne' && prevIsNear) {
+    pushEvent('DEPARTED', reg, prev.nearest.loc.name, prev.nearest.dist, ac);
+  } else if (prev.status==='airborne' && status==='ground' && isNear) {
+    pushEvent('ARRIVED', reg, nearest.loc.name, nearest.dist, ac);
+  } else if (status==='airborne' && alt!==null && prev.alt!==null) {
+    if (prev.alt<=EVENT_ALT_FT && alt>EVENT_ALT_FT && prevIsNear)
+      pushEvent('DEPARTED', reg, prev.nearest.loc.name, prev.nearest.dist, ac);
+    else if (prev.alt>EVENT_ALT_FT && alt<=EVENT_ALT_FT && isNear)
+      pushEvent('ARRIVED', reg, nearest.loc.name, nearest.dist, ac);
+  }
+}
+
+function pushEvent(type, reg, locName, dist, ac) {
+  events.unshift({ type, reg, locName, dist:dist.toFixed(2),
+    callsign:(ac.flight||'').trim(),
+    alt: typeof ac.alt_baro==='number'?fmt(ac.alt_baro)+' ft':'Ground',
+    time: nowTime() });
+  if (events.length>100) events.pop();
+  renderEvents();
+}
+
+function renderEvents() {
+  const el=document.getElementById('events-list');
+  if (!events.length) {
+    el.innerHTML='<div class="no-events">No depart/arrive events yet — monitoring active</div>';
+    return;
+  }
+  el.innerHTML=events.map(ev=>{
+    const cls=ev.type==='DEPARTED'?'departed':'arrived';
+    const tcls=ev.type==='DEPARTED'?'dep':'arr';
+    const label=ev.type==='DEPARTED'?'↑ DEPART':'↓ ARRIVE';
+    return `<div class="event-card ${cls}">
+      <span class="event-type ${tcls}">${label}</span>
+      <span class="event-reg">${ev.reg}</span>
+      <span class="event-loc">${ev.locName}${ev.callsign?' · '+ev.callsign:''}</span>
+      <span class="event-detail">${ev.alt} · ${ev.dist} nm</span>
+      <span class="event-time">${ev.time}</span>
+    </div>`;
+  }).join('');
+}
+
+function setFilter(f){
+  currentFilter=f;
+  ['all','airborne','ground','prox'].forEach(k=>{
+    document.getElementById('btn-'+k).classList.toggle('active',k===f);
+  });
+  renderTable();
+}
+
+function sortBy(key){
+  if(sortKey===key) sortAsc=!sortAsc; else { sortKey=key; sortAsc=true; }
+  renderTable();
+}
+
+function renderTable(){
+  const search=document.getElementById('search-box').value.toLowerCase();
+  let rows=allData.map(ac=>{
+    const status=getStatus(ac);
+    const nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null;
+    const isNear=nearest&&nearest.dist<=PROX_NM;
+    return {...ac, _status:status, _nearest:nearest, _isNear:isNear};
+  });
+
+  if (currentFilter==='airborne') rows=rows.filter(r=>r._status==='airborne');
+  else if (currentFilter==='ground') rows=rows.filter(r=>r._status==='ground');
+  else if (currentFilter==='prox') rows=rows.filter(r=>r._isNear);
+
+  if (search) rows=rows.filter(r=>
+    (r.r||'').toLowerCase().includes(search)||
+    (r.flight||'').toLowerCase().includes(search)||
+    (r.t||'').toLowerCase().includes(search)||
+    (r.hex||'').toLowerCase().includes(search)||
+    (r._nearest?r._nearest.loc.name.toLowerCase().includes(search):false)
+  );
+
+  rows.sort((a,b)=>{
+    let av,bv;
+    if (sortKey==='status'){ av=statusOrder(a._status); bv=statusOrder(b._status); }
+    else if (sortKey==='alt_baro'){
+      av=typeof a.alt_baro==='number'?a.alt_baro:(a.alt_baro==='ground'?-1:-999);
+      bv=typeof b.alt_baro==='number'?b.alt_baro:(b.alt_baro==='ground'?-1:-999);
+    }
+    else if (sortKey==='nearestDist'){ av=a._nearest?a._nearest.dist:9999; bv=b._nearest?b._nearest.dist:9999; }
+    else if (sortKey==='nearestName'){ av=a._nearest?a._nearest.loc.name:'zzz'; bv=b._nearest?b._nearest.loc.name:'zzz'; }
+    else { av=((a[sortKey]||'')+'').toLowerCase(); bv=((b[sortKey]||'')+'').toLowerCase(); }
+    if(av<bv) return sortAsc?-1:1;
+    if(av>bv) return sortAsc?1:-1;
+    return 0;
+  });
+
+  const tbody=document.getElementById('table-body');
+  if (!rows.length){ tbody.innerHTML='<tr><td colspan="12" class="loading-msg">No aircraft match</td></tr>'; return; }
+
+  const icaoParam=ICAOS.join(',').toUpperCase();
+  tbody.innerHTML=rows.map(ac=>{
+    const s=ac._status;
+    const dotCls=s==='airborne'?'status-airborne':s==='ground'?'status-ground':'status-stale';
+    const sLabel=s==='airborne'?'Airborne':s==='ground'?'On Ground':'No Signal';
+    const n=ac._nearest, isNear=ac._isNear;
+    const locName=n?n.loc.name:'—';
+    const locDist=n?n.dist.toFixed(1)+' nm':'—';
+    const badge=isNear?(s==='ground'?'<span class="at-badge">AT</span>':'<span class="prox-badge">NEAR</span>'):'';
+    const seenCls=ac.seen>60?'seen-stale':'seen-ok';
+    const altClr=typeof ac.alt_baro==='number'&&ac.baro_rate>200?'color:#00e5ff':typeof ac.alt_baro==='number'&&ac.baro_rate<-200?'color:#ffc947':'';
+    const link='https://globe.adsbexchange.com/?icao='+icaoParam;
+    return `<tr class="data-row">
+      <td><div class="status-cell"><span class="status-dot ${dotCls}"></span>${sLabel}</div></td>
+      <td><span class="reg">${(ac.r||ac.hex.toUpperCase()).trim()}</span></td>
+      <td><span class="callsign">${(ac.flight||'—').trim()}</span></td>
+      <td><span class="type-code">${ac.t||'—'}</span></td>
+      <td style="${altClr}">${fmtAlt(ac)}</td>
+      <td>${fmt(ac.gs)}</td>
+      <td>${fmtVR(ac)}</td>
+      <td>${ac.squawk||'—'}</td>
+      <td>${locName}${badge}</td>
+      <td>${locDist}</td>
+      <td><span class="${seenCls}">${fmtSeen(ac.seen)}</span></td>
+      <td><a class="adsbx-link" href="${link}" target="_blank">↗ ADSBx</a></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadData(){
+  document.getElementById('last-updated').textContent='Fetching...';
+  const batch=ICAOS.join(',').toUpperCase();
+  try {
+    const res=await fetch('https://opendata.adsb.fi/api/v2/icao/'+batch);
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    const json=await res.json();
+    const fresh=json.ac||[];
+
+    fresh.forEach(ac=>{
+      const status=getStatus(ac);
+      const alt=typeof ac.alt_baro==='number'?ac.alt_baro:(ac.alt_baro==='ground'?0:null);
+      const nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null;
+      detectEvents(ac,status,nearest);
+      prevStates[ac.hex]={status,alt,nearest};
+    });
+
+    allData=fresh;
+    const statuses=fresh.map(ac=>getStatus(ac));
+    const proxCount=fresh.filter(ac=>{
+      if(!ac.lat) return false;
+      const n=nearestLoc(ac.lat,ac.lon);
+      return n&&n.dist<=PROX_NM;
+    }).length;
+
+    document.getElementById('stat-total').textContent=ICAOS.length;
+    document.getElementById('stat-airborne').textContent=statuses.filter(s=>s==='airborne').length;
+    document.getElementById('stat-ground').textContent=statuses.filter(s=>s==='ground').length;
+    document.getElementById('stat-stale').textContent=statuses.filter(s=>s==='stale').length+(ICAOS.length-fresh.length);
+    document.getElementById('stat-prox').textContent=proxCount;
+    document.getElementById('last-updated').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+    renderTable();
+    renderEvents();
+  } catch(e) {
+    document.getElementById('last-updated').textContent='Error';
+    document.getElementById('table-body').innerHTML=`<tr><td colspan="12" class="error-msg">Fetch failed: ${e.message}</td></tr>`;
+  }
+}
+
+loadData();
+setInterval(loadData, 60000);
+</script>
+</body>
+</html>
