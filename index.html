@@ -492,19 +492,54 @@ async function searchAnyTail(){
     const isOffline=ac._offline;
     const status=isOffline?'offline':getStatus(ac);
     const icon=getAcIcon(ac);
-    const statusStr=status==='airborne'?'\u25b2 Airborne \u00b7 '+Math.round(ac.alt_baro||0).toLocaleString()+' ft \u00b7 '+Math.round(ac.gs||0)+' kt'
-      :status==='ground'?'\u25cf On Ground \u00b7 No active signal'
-      :'\u25cb Parked / No signal (registration found)';
-    const statusColor=status==='airborne'?'#00e5ff':status==='ground'?'#ffc947':'#4a6278';
     const inFleet=!!tails.find(t=>t.hex===ac.hex);
     const inWatch=!!watchlist.find(w=>w.hex===ac.hex);
-    resultEl.innerHTML='<div class="search-result-card">'+
-      '<span style="font-size:20px">'+icon+'</span>'+
-      '<span class="src-reg">'+(ac.r||ac.hex.toUpperCase()).trim()+'</span>'+
-      '<span class="src-type">'+(ac.t||'--')+(ac.desc?' \u00b7 '+ac.desc:'')+'</span>'+
-      '<span class="src-owner">'+(ac.ownOp||'')+'</span>'+
-      '<span style="font-size:11px;font-family:Space Mono,monospace;color:'+statusColor+'">'+statusStr+'</span>'+
-    '</div>';
+
+    // Build full detail rows
+    const statusColor=status==='airborne'?'#00e5ff':status==='ground'?'#ffc947':'#4a6278';
+    const statusLabel=status==='airborne'?'\u25b2 Airborne':status==='ground'?'\u25cf On Ground':'\u25cb No Signal / Parked';
+    const nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null;
+
+    function row(label,val,color){
+      return'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2d3d;">'+
+        '<span style="color:#4a6278;font-size:11px;font-family:Space Mono,monospace">'+label+'</span>'+
+        '<span style="color:'+(color||'#c8d6e5')+';font-size:11px;font-family:Space Mono,monospace;font-weight:700">'+val+'</span>'+
+      '</div>';
+    }
+
+    const altStr=typeof ac.alt_baro==='number'?Math.round(ac.alt_baro).toLocaleString()+' ft':ac.alt_baro==='ground'?'Ground':'--';
+    const gsStr=ac.gs!=null?Math.round(ac.gs)+' kt':'--';
+    const vrVal=ac.baro_rate!=null?Math.round(ac.baro_rate):null;
+    const vrStr=vrVal==null?'--':vrVal>100?'\u25b2 '+Math.round(vrVal)+' fpm':vrVal<-100?'\u25bc '+Math.abs(Math.round(vrVal))+' fpm':'Level';
+    const vrColor=vrVal==null?'#4a6278':vrVal>100?'#00e5ff':vrVal<-100?'#ffc947':'#4a6278';
+    const posStr=ac.lat!=null?ac.lat.toFixed(4)+'\u00b0, '+ac.lon.toFixed(4)+'\u00b0':'--';
+    const nearStr=nearest?nearest.loc.name+' ('+nearest.dist.toFixed(1)+' nm)':'--';
+
+    resultEl.innerHTML=
+      '<div style="background:#060a10;border:1px solid #1e2d3d;border-radius:8px;padding:14px 16px;margin-top:10px;">'+
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #1e2d3d;">'+
+          '<span style="font-size:22px">'+icon+'</span>'+
+          '<div>'+
+            '<div style="font-family:Space Mono,monospace;font-size:14px;font-weight:700;color:#00e5ff">'+(ac.r||ac.hex.toUpperCase()).trim()+'</div>'+
+            '<div style="font-size:11px;color:#9fb3c8">'+(ac.t||'')+(ac.desc?' \u00b7 '+ac.desc:'')+'</div>'+
+            '<div style="font-size:10px;color:#4a6278">'+(ac.ownOp||'')+'</div>'+
+          '</div>'+
+          '<div style="margin-left:auto;font-family:Space Mono,monospace;font-size:12px;font-weight:700;color:'+statusColor+'">'+statusLabel+'</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">'+
+          row('ICAO HEX', ac.hex.toUpperCase())+
+          row('Squawk', ac.squawk||'--')+
+          row('Altitude', altStr, typeof ac.alt_baro==='number'&&ac.baro_rate>200?'#00e5ff':typeof ac.alt_baro==='number'&&ac.baro_rate<-200?'#ffc947':'#c8d6e5')+
+          row('Ground Speed', gsStr)+
+          row('Vert Rate', vrStr, vrColor)+
+          row('Callsign', (ac.flight||'--').trim())+
+          row('Position', posStr)+
+          row('Nearest', nearStr)+
+          (ac.seen!=null&&!isOffline?row('Last Seen', Math.round(ac.seen)+'s ago', ac.seen>60?'#ff4f5e':'#4a6278'):'')+
+          (ac.category?row('Category', ac.category):'')  +
+        '</div>'+
+      '</div>';
+
     addBtn.textContent=inFleet?'\u2713 In Fleet':'+ Add to Fleet';
     addBtn.style.display='inline-block';
     watchBtn.textContent=inWatch?'\u2605 Watching':'\u2606 Watch';
