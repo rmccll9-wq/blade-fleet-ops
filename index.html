@@ -735,11 +735,6 @@ async function loadData(){
         });
       },i*200));
     }
-      setTimeout(()=>{
-        fresh.forEach(ac=>{const r=_regCache[ac.hex];if(r&&!ac.r){ac.r=r.r;ac.t=r.t;ac.desc=r.desc;}});
-        renderTable();renderWatchlist();
-      },3000);
-    }
     fresh.forEach(ac=>{
       const status=getStatus(ac);
       const alt=typeof ac.alt_baro==='number'?ac.alt_baro:ac.alt_baro==='ground'?0:null;
