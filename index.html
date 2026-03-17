@@ -185,19 +185,10 @@
     <div class="panel-body" id="search-panel">
       <div class="search-row">
         <div style="display:flex;flex-direction:column;gap:3px">
-          <input class="tm-input hex" id="any-hex" placeholder="ICAO HEX" maxlength="6"
+          <input class="tm-input" id="any-query" placeholder="N-number or ICAO hex (e.g. N12345 or A1B2C3)"
             oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')searchAnyTail()">
-          <div class="tm-hint">e.g. A5818B</div>
+          <button class="btn" onclick="searchAnyTail()">SEARCH</button>
         </div>
-        <div style="display:flex;flex-direction:column;gap:3px">
-          <input class="tm-input reg" id="any-reg" placeholder="OR REG (N-number)"
-            oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')searchAnyTail()">
-          <div class="tm-hint">e.g. N454FX</div>
-        </div>
-        <button class="btn" onclick="searchAnyTail()" style="align-self:flex-start;padding:8px 14px">Search</button>
-        <button class="btn success" id="add-from-search-btn" onclick="addFromSearch()" style="display:none;align-self:flex-start;padding:8px 14px">+ Add to Fleet</button>
-        <button class="btn warn" id="watch-from-search-btn" onclick="watchFromSearch()" style="display:none;align-self:flex-start;padding:8px 14px">&#9734; Watch</button>
-      </div>
       <div id="search-result"></div>
     </div>
   </div>
@@ -438,63 +429,36 @@ function renderWatchlist(){
 // Search any tail using OpenSky (live) + adsbdb (static)
 let lastSearchResult=null;
 async function searchAnyTail(){
-  const hexIn=document.getElementById('any-hex').value.trim().toUpperCase().replace(/[^A-F0-9]/g,'');
-  const regIn=document.getElementById('any-reg').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const raw=(document.getElementById('any-query')||{value:''}).value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!raw){showAlert('Enter an N-number or ICAO hex code','warn');return;}
+  const isHex=/^[0-9A-F]{6}$/.test(raw);
   const resultEl=document.getElementById('search-result');
-  const addBtn=document.getElementById('add-from-search-btn');
-  const watchBtn=document.getElementById('watch-from-search-btn');
-  if(!hexIn&&!regIn){resultEl.innerHTML='<div class="src-notfound">Enter a hex or registration</div>';return;}
-  resultEl.innerHTML='<div class="no-events">Searching...</div>';
-  addBtn.style.display='none';watchBtn.style.display='none';lastSearchResult=null;
-  try{
-    let ac=null;
-    let regInfo=null,searchHex=hexIn.toLowerCase();
-    if(hexIn){
-      try{
-        const r=await fetch('https://api.adsbdb.com/v0/aircraft/'+hexIn.toLowerCase(),{signal:AbortSignal.timeout(6000)});
-        if(r.ok){const j=await r.json();const a=j.response&&j.response.aircraft;if(a)regInfo={r:a.registration||'',t:a.icao_type||'',desc:a.type||'',ownOp:a.registered_owner||''};}
-      }catch(e){}
-    }
-    if(!hexIn&&regIn){
-      try{
-        const r=await fetch('https://api.adsbdb.com/v0/registration/'+regIn,{signal:AbortSignal.timeout(6000)});
-        if(r.ok){const j=await r.json();const a=j.response&&j.response.aircraft;if(a){searchHex=(a.mode_s||'').toLowerCase();regInfo={r:a.registration||regIn,t:a.icao_type||'',desc:a.type||'',ownOp:a.registered_owner||''};}}
-      }catch(e){}
-    }
-    if(searchHex){
-      try{
-        const r=await fetch('https://opensky-network.org/api/states/all?icao24='+searchHex,{signal:AbortSignal.timeout(8000)});
-        if(r.ok){const j=await r.json();if(j.states&&j.states.length>0){ac=openskyToAc(j.states[0],regInfo);}}
-      }catch(e){}
-    }
-    if(!ac&&(regInfo||searchHex)){
-      ac={hex:searchHex,r:regInfo?regInfo.r:hexIn,t:regInfo?regInfo.t:'',desc:regInfo?regInfo.desc:'',ownOp:regInfo?regInfo.ownOp:'',flight:'',lat:null,lon:null,alt_baro:null,gs:null,baro_rate:null,squawk:'',seen:null,_offline:true};
-    }
-    if(!ac){resultEl.innerHTML='<div class="src-notfound">Not found. Check hex/registration and try again.</div>';return;}
-    lastSearchResult=ac;
-    const isOffline=ac._offline||ac.seen===null;
-    const status=isOffline?'offline':getStatus(ac);
-    const icon=getAcIcon(ac);
-    const inFleet=!!tails.find(t=>t.hex===ac.hex);
-    const inWatch=!!watchlist.find(w=>w.hex===ac.hex);
-    const statusColor=status==='airborne'?'#00e5ff':status==='ground'?'#ffc947':'#4a6278';
-    const statusLabel=status==='airborne'?'▲ Airborne':status==='ground'?'● On Ground':'○ No Signal / Parked';
-    const nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null;
-    function row(label,val,color){return'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e2d3d;"><span style="color:#4a6278;font-size:11px;font-family:Space Mono,monospace">'+label+'</span><span style="color:'+(color||'#c8d6e5')+';font-size:11px;font-family:Space Mono,monospace;font-weight:700">'+val+'</span></div>';}
-    const altStr=typeof ac.alt_baro==='number'?Math.round(ac.alt_baro).toLocaleString()+' ft':ac.alt_baro==='ground'?'Ground':'--';
-    const gsStr=ac.gs!=null?Math.round(ac.gs)+' kt':'--';
-    const vrVal=ac.baro_rate!=null?Math.round(ac.baro_rate):null;
-    const vrStr=vrVal==null?'--':vrVal>100?'▲ '+Math.round(vrVal)+' fpm':vrVal<-100?'▼ '+Math.abs(Math.round(vrVal))+' fpm':'Level';
-    const vrColor=vrVal==null?'#4a6278':vrVal>100?'#00e5ff':vrVal<-100?'#ffc947':'#4a6278';
-    const posStr=ac.lat!=null?ac.lat.toFixed(4)+'°, '+ac.lon.toFixed(4)+'°':'--';
-    const nearStr=nearest?nearest.loc.name+' ('+nearest.dist.toFixed(1)+' nm)':'--';
-    resultEl.innerHTML='<div style="background:#060a10;border:1px solid #1e2d3d;border-radius:8px;padding:14px 16px;margin-top:10px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #1e2d3d;"><span style="font-size:22px">'+icon+'</span><div><div style="font-family:Space Mono,monospace;font-size:14px;font-weight:700;color:#00e5ff">'+(ac.r||ac.hex.toUpperCase()).trim()+'</div><div style="font-size:11px;color:#9fb3c8">'+(ac.t||'')+(ac.desc?' · '+ac.desc:'')+'</div><div style="font-size:10px;color:#4a6278">'+(ac.ownOp||'')+'</div></div><div style="margin-left:auto;font-family:Space Mono,monospace;font-size:12px;font-weight:700;color:'+statusColor+'">'+statusLabel+'</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;">'+row('ICAO HEX',ac.hex.toUpperCase())+row('Squawk',ac.squawk||'--')+row('Altitude',altStr)+row('Ground Speed',gsStr)+row('Vert Rate',vrStr,vrColor)+row('Callsign',(ac.flight||'--').trim())+row('Position',posStr)+row('Nearest',nearStr)+(ac.seen!=null&&!isOffline?row('Last Seen',Math.round(ac.seen)+'s ago',ac.seen>60?'#ff4f5e':'#4a6278'):'')+row('Source',isOffline?'No Signal (adsbdb)':'OpenSky Live')+'</div></div>';
-    addBtn.textContent=inFleet?'✓ In Fleet':'+ Add to Fleet';
-    addBtn.style.display='inline-block';
-    watchBtn.textContent=inWatch?'★ Watching':'☆ Watch';
-    watchBtn.style.display='inline-block';
-  }catch(e){
-    resultEl.innerHTML='<div class="src-notfound">Error: '+e.message+'</div>';
+  resultEl.innerHTML='<span style="color:#4a6278">Searching...</span>';
+  if(isHex){
+    const hex=raw;
+    const existing=_tails.find(t=>t.hex===hex);
+    if(existing){resultEl.innerHTML='<span class="gr">Found in fleet: '+hex+'</span>';return;}
+    fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase()).then(r=>r.json()).then(data=>{
+      if(!data.states||!data.states.length){resultEl.innerHTML='<span class="re">No live data for '+hex+'</span>';return;}
+      const ac=openskyToAc(data.states[0]);
+      resultEl.innerHTML='<span class="gr">'+hex+': '+ac.flight.trim()+'  Alt:'+ac.alt_baro+'ft  Spd:'+ac.gs+'kt</span>';
+    }).catch(e=>resultEl.innerHTML='<span class="re">Error: '+e.message+'</span>');
+  } else {
+    const reg=raw;
+    fetch('https://api.adsbdb.com/v0/aircraft/'+reg).then(r=>r.json()).then(data=>{
+      if(!data.response||!data.response.aircraft){resultEl.innerHTML='<span class="re">No data for '+reg+'</span>';return;}
+      const info=data.response.aircraft;
+      const hex=(info.mode_s||'').toUpperCase();
+      resultEl.innerHTML='<span class="gr">'+reg+' → '+hex+'  '+info.type+' / '+(info.registered_owner||'')+'</span>';
+      if(hex){
+        fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase()).then(r=>r.json()).then(liveData=>{
+          if(liveData.states&&liveData.states.length){
+            const ac=openskyToAc(liveData.states[0]);
+            resultEl.innerHTML+='<br><span class="gr">Live: Alt:'+ac.alt_baro+'ft  Spd:'+ac.gs+'kt  Hdg:'+ac.track+'°</span>';
+          }
+        }).catch(()=>{});
+      }
+    }).catch(e=>resultEl.innerHTML='<span class="re">Error: '+e.message+'</span>');
   }
 }
 function addFromSearch(){
@@ -760,10 +724,17 @@ async function loadData(){
         fresh.push({hex,flight:'',lat:null,lon:null,alt_baro:null,gs:null,baro_rate:null,squawk:'',seen:999,r:reg?reg.r:'',t:reg?reg.t:'',desc:reg?reg.desc:'',ownOp:''});
       }
     });
-    // Fetch missing reg info in background
+    // Fetch missing reg info in background (staggered) and auto-label
     const missingReg=hexList.filter(h=>!_regCache[h]);
     if(missingReg.length>0){
-      missingReg.slice(0,10).forEach(hex=>fetchRegInfo(hex));
+      missingReg.forEach((hex,i)=>setTimeout(()=>{
+        fetchRegInfo(hex).then(info=>{
+          if(!info)return;
+          const tail=_tails.find(t=>t.hex===hex);
+          if(tail&&!tail.label&&info.r){tail.label=info.r;saveTails();renderAll();}
+        });
+      },i*200));
+    }
       setTimeout(()=>{
         fresh.forEach(ac=>{const r=_regCache[ac.hex];if(r&&!ac.r){ac.r=r.r;ac.t=r.t;ac.desc=r.desc;}});
         renderTable();renderWatchlist();
