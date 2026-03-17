@@ -141,7 +141,7 @@
 
 <div id="lock-screen">
   <div class="lock-logo">BLADE</div>
-  <div class="lock-sub">Fleet Ops â Restricted Access</div>
+  <div class="lock-sub">Fleet Ops — Restricted Access</div>
   <div class="lock-box">
     <div>
       <div class="lock-label">Password</div>
@@ -157,23 +157,23 @@
     <div class="header-left">
       <span class="blade-logo">BLADE</span>
       <span style="color:#1e2d3d;font-size:18px">|</span>
-      <span class="dash-title">Fleet Ops â Live Tail Tracker</span>
+      <span class="dash-title">Fleet Ops — Live Tail Tracker</span>
     </div>
     <div class="header-right">
       <span class="auto-label">Auto: 60s</span>
       <div class="live-dot"></div>
-      <span class="last-updated" id="last-updated">â</span>
-      <button class="btn" onclick="loadData()">âº Refresh</button>
+      <span class="last-updated" id="last-updated">—</span>
+      <button class="btn" onclick="loadData()">↺ Refresh</button>
       <button class="btn danger" onclick="logout()">Lock</button>
     </div>
   </div>
 
   <div class="stats-bar">
-    <div class="stat-card"><div class="stat-label">Total Tails</div><div class="stat-value sw" id="stat-total">â</div></div>
-    <div class="stat-card"><div class="stat-label">Airborne</div><div class="stat-value cy" id="stat-airborne">â</div></div>
-    <div class="stat-card"><div class="stat-label">On Ground</div><div class="stat-value ye" id="stat-ground">â</div></div>
-    <div class="stat-card"><div class="stat-label">No Signal</div><div class="stat-value re" id="stat-stale">â</div></div>
-    <div class="stat-card"><div class="stat-label">At Helipad / Airport</div><div class="stat-value gr" id="stat-prox">â</div></div>
+    <div class="stat-card"><div class="stat-label">Total Tails</div><div class="stat-value sw" id="stat-total">—</div></div>
+    <div class="stat-card"><div class="stat-label">Airborne</div><div class="stat-value cy" id="stat-airborne">—</div></div>
+    <div class="stat-card"><div class="stat-label">On Ground</div><div class="stat-value ye" id="stat-ground">—</div></div>
+    <div class="stat-card"><div class="stat-label">No Signal</div><div class="stat-value re" id="stat-stale">—</div></div>
+    <div class="stat-card"><div class="stat-label">At Helipad / Airport</div><div class="stat-value gr" id="stat-prox">—</div></div>
   </div>
 
   <!-- SEARCH ANY TAIL -->
@@ -410,7 +410,7 @@ function renderWatchlist(){
   const badge=document.getElementById('watch-count-badge');
   badge.textContent=watchlist.length?'('+watchlist.length+')':'';
   if(!watchlist.length){
-    grid.innerHTML='<div class="no-events" style="grid-column:1/-1">No tails watched yet â search any tail and click Watch</div>';
+    grid.innerHTML='<div class="no-events" style="grid-column:1/-1">No tails watched yet — search any tail and click Watch</div>';
     return;
   }
   grid.innerHTML=watchlist.map(w=>{
