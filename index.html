@@ -460,8 +460,8 @@ function renderWatchlist(){
       +'<span class="wc-status '+statusCls+'">'+statusLabel+(status==='airborne'?' · '+alt:'')+'</span>'
       +'</div>'
       +'<div class="wc-actions">'
-      +'<button class="wc-btn'+(w.alert?' wc-bell':'')+'" onclick="toggleWatchAlert(''+w.hex+'')" title="Toggle alerts">🔔</button>'
-      +'<button class="wc-btn" onclick="removeFromWatchlist(''+w.hex+'')" title="Remove">✕</button>'
+      +'<button class="wc-btn'+(w.alert?' wc-bell':'')+'" onclick="toggleWatchAlert(\x27'+w.hex+'\x27)" title="Toggle alerts">🔔</button>'
+      +'<button class="wc-btn" onclick="removeFromWatchlist(\x27'+w.hex+'\x27)" title="Remove">✕</button>'
       +'</div>'
       +'</div>';
   }).join('');
