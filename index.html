@@ -744,8 +744,8 @@ async function loadData(){
 
   document.getElementById('last-updated').textContent='Fetching...';
   const hexList=tails.map(t=>t.hex.toLowerCase());
-  const params=hexList.map(h=>'icao24='+h).join('&');
-  const url='https://opensky-network.org/api/states/all?'+params;
+  const params=hexList.join(',');
+  const url='https://opensky-network.org/api/states/all?icao24='+params;
   try{
     const res=await fetch(url,{signal:AbortSignal.timeout(15000)});
     if(res.status===429){
