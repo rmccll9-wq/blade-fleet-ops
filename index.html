@@ -528,11 +528,10 @@ function removeTail(i){
   allData=allData.filter(ac=>ac.hex!==t.hex);renderTable();updateStats();
 }
 function bulkAdd(){
-  const tokens=document.getElementById('bulk-input').value.split(/[
-,]+/).map(s=>s.trim()).filter(Boolean);
+  const tokens=document.getElementById('bulk-input').value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   let added=0,skipped=0;
   tokens.forEach(tok=>{
-    const parts=tok.split(/s+/),hex=parts[0].toLowerCase().replace(/[^a-f0-9]/g,''),label=parts.slice(1).join(' ');
+    const parts=tok.split(/\s+/),hex=parts[0].toLowerCase().replace(/[^a-f0-9]/g,''),label=parts.slice(1).join(' ');
     if(hex.length===6&&!tails.find(t=>t.hex===hex)){tails.push({hex,label});added++;}else skipped++;
   });
   saveTails();renderTailGrid();document.getElementById('bulk-input').value='';toggleBulk();
