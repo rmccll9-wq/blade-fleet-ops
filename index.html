@@ -7,138 +7,176 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'DM Sans', sans-serif; background: #060a10; color: #c8d6e5; min-height: 100vh; }
-  #lock-screen { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; }
-  .lock-logo { font-family:'Space Mono',monospace; font-size:18px; font-weight:700; color:#00e5ff; letter-spacing:6px; margin-bottom:8px; }
-  .lock-sub  { font-size:11px; color:#2a3f55; letter-spacing:2px; text-transform:uppercase; margin-bottom:40px; font-family:'Space Mono',monospace; }
-  .lock-box  { background:#0e1821; border:1px solid #1e2d3d; border-radius:12px; padding:32px 40px; width:100%; max-width:360px; display:flex; flex-direction:column; gap:16px; }
-  .lock-label { font-size:11px; color:#4a6278; letter-spacing:1px; text-transform:uppercase; font-family:'Space Mono',monospace; margin-bottom:4px; }
-  .lock-input { background:#060a10; border:1px solid #1e2d3d; color:#c8d6e5; font-family:'Space Mono',monospace; font-size:14px; padding:12px 16px; border-radius:6px; width:100%; outline:none; letter-spacing:2px; }
-  .lock-input:focus { border-color:#00e5ff44; }
-  .lock-btn { background:#00e5ff; color:#060a10; font-family:'Space Mono',monospace; font-size:12px; font-weight:700; padding:12px; border-radius:6px; border:none; cursor:pointer; letter-spacing:2px; }
-  .lock-btn:hover { background:#00cfea; }
-  .lock-error { font-family:'Space Mono',monospace; font-size:11px; color:#ff4f5e; text-align:center; min-height:16px; }
-  #main-dash { display:none; padding:20px; max-width:1500px; margin:0 auto; }
-  .header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid #1e2d3d; flex-wrap:wrap; gap:12px; }
-  .header-left { display:flex; align-items:center; gap:12px; }
-  .blade-logo { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; color:#00e5ff; letter-spacing:4px; }
-  .dash-title { font-size:12px; color:#4a6278; letter-spacing:1px; text-transform:uppercase; }
-  .header-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .live-dot { width:8px; height:8px; background:#00e5ff; border-radius:50%; animation:pulse 2s infinite; flex-shrink:0; }
-  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
-  .last-updated { font-family:'Space Mono',monospace; font-size:11px; color:#4a6278; }
-  .btn { background:#1e2d3d; border:1px solid #2a3f55; color:#00e5ff; font-family:'Space Mono',monospace; font-size:11px; padding:6px 12px; border-radius:4px; cursor:pointer; white-space:nowrap; }
-  .btn:hover { background:#243444; }
-  .btn.danger { color:#ff4f5e; border-color:#ff4f5e44; }
-  .btn.danger:hover { background:#1a0e10; }
-  .btn.success { color:#4cff91; border-color:#4cff9144; }
-  .btn.success:hover { background:#0a1a10; }
-  .btn.warn { color:#ffc947; border-color:#ffc94744; }
-  .auto-label { font-size:11px; color:#2a3f55; font-family:'Space Mono',monospace; }
-  .stats-bar { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:18px; }
-  .stat-card { background:#0e1821; border:1px solid #1e2d3d; border-radius:10px; padding:12px 16px; text-align:center; }
-  .stat-label { font-size:10px; color:#4a6278; letter-spacing:1px; text-transform:uppercase; margin-bottom:5px; }
-  .stat-value { font-family:'Space Mono',monospace; font-size:24px; font-weight:700; }
-  .sw{color:#c8d6e5;}.cy{color:#00e5ff;}.ye{color:#ffc947;}.re{color:#ff4f5e;}.gr{color:#4cff91;}
-  .panel { background:#0e1821; border:1px solid #1e2d3d; border-radius:10px; padding:16px 20px; margin-bottom:16px; }
-  .panel-header { display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; }
-  .panel-title { font-family:'Space Mono',monospace; font-size:11px; color:#4a6278; letter-spacing:2px; text-transform:uppercase; display:flex; align-items:center; gap:8px; }
-  .panel-arrow { font-family:'Space Mono',monospace; font-size:11px; color:#2a3f55; }
-  .panel-body { display:none; margin-top:14px; }
-  .panel-body.open { display:block; }
-  .search-row { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
-  .tm-input { background:#060a10; border:1px solid #1e2d3d; color:#c8d6e5; font-family:'Space Mono',monospace; font-size:12px; padding:8px 12px; border-radius:4px; outline:none; }
-  .tm-input:focus { border-color:#00e5ff44; }
-  .tm-input.hex { width:130px; text-transform:uppercase; }
-  .tm-input.reg { width:130px; text-transform:uppercase; }
-  .tm-input.lbl { width:180px; }
-  .tm-input.bulk { width:100%; height:70px; resize:vertical; font-size:11px; margin-bottom:8px; }
-  .tm-hint { font-size:10px; color:#2a3f55; font-family:'Space Mono',monospace; margin-top:3px; }
-  .search-result-card { background:#060a10; border:1px solid #1e2d3d; border-radius:6px; padding:12px 16px; margin-top:10px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  .src-reg { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; color:#00e5ff; }
-  .src-type { font-size:12px; color:#9fb3c8; }
-  .src-owner { font-size:11px; color:#4a6278; flex:1; }
-  .src-notfound { font-family:'Space Mono',monospace; font-size:12px; color:#ff4f5e; padding:10px 0; }
-  .watch-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; max-height:220px; overflow-y:auto; margin-bottom:8px; }
-  .watch-grid::-webkit-scrollbar { width:4px; }
-  .watch-grid::-webkit-scrollbar-thumb { background:#1e2d3d; border-radius:2px; }
-  .watch-chip { background:#060a10; border:1px solid #1e2d3d; border-radius:6px; padding:8px 12px; display:flex; align-items:center; gap:10px; }
-  .watch-chip.alert-on { border-color:#ffc94766; }
-  .wc-icon { font-size:16px; flex-shrink:0; }
-  .wc-info { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
-  .wc-reg { font-family:'Space Mono',monospace; font-size:11px; font-weight:700; color:#00e5ff; }
-  .wc-lbl { font-size:11px; color:#4a6278; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .wc-status { font-size:10px; font-family:'Space Mono',monospace; }
-  .wc-status.air{color:#00e5ff;}.wc-status.gnd{color:#ffc947;}.wc-status.no{color:#2a3f55;}
-  .wc-actions { display:flex; gap:4px; flex-shrink:0; }
-  .wc-btn { background:none; border:none; font-size:12px; cursor:pointer; color:#2a3f55; padding:0 2px; line-height:1; }
-  .wc-btn:hover { color:#ff4f5e; }
-  .wc-bell { color:#ffc947 !important; }
-  .tail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:8px; max-height:240px; overflow-y:auto; }
-  .tail-grid::-webkit-scrollbar { width:4px; }
-  .tail-grid::-webkit-scrollbar-thumb { background:#1e2d3d; border-radius:2px; }
-  .tail-chip { background:#060a10; border:1px solid #1e2d3d; border-radius:6px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
-  .tc-info { display:flex; flex-direction:column; gap:2px; min-width:0; }
-  .tc-hex { font-family:'Space Mono',monospace; font-size:11px; color:#00e5ff; font-weight:700; letter-spacing:1px; }
-  .tc-lbl { font-size:11px; color:#4a6278; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .tc-remove { background:none; border:none; color:#2a3f55; cursor:pointer; font-size:14px; padding:0 2px; }
-  .tc-remove:hover { color:#ff4f5e; }
-  .tm-count { font-family:'Space Mono',monospace; font-size:10px; color:#2a3f55; margin-top:8px; }
-  .section-label { font-family:'Space Mono',monospace; font-size:10px; color:#4a6278; letter-spacing:2px; text-transform:uppercase; margin-bottom:10px; display:flex; align-items:center; gap:10px; }
-  .section-label::after { content:''; flex:1; height:1px; background:#1e2d3d; }
-  .events-list { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto; }
-  .events-list::-webkit-scrollbar { width:4px; }
-  .events-list::-webkit-scrollbar-thumb { background:#1e2d3d; border-radius:2px; }
-  .event-card { background:#0e1821; border:1px solid #1e2d3d; border-radius:6px; padding:9px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .event-card.departed { border-left:3px solid #ff8c42; }
-  .event-card.arrived  { border-left:3px solid #4cff91; }
-  .event-card.watched  { border-color:#ffc94766; }
-  .ev-type { font-family:'Space Mono',monospace; font-size:11px; font-weight:700; letter-spacing:1px; min-width:72px; }
-  .ev-type.dep{color:#ff8c42;}.ev-type.arr{color:#4cff91;}
-  .ev-reg  { font-family:'Space Mono',monospace; font-size:12px; font-weight:700; color:#00e5ff; min-width:65px; }
-  .ev-loc  { font-size:12px; color:#9fb3c8; flex:1; }
-  .ev-detail { font-size:11px; color:#4a6278; font-family:'Space Mono',monospace; }
-  .ev-time { font-family:'Space Mono',monospace; font-size:10px; color:#2a3f55; min-width:55px; text-align:right; }
-  .no-events { font-size:12px; color:#2a3f55; font-family:'Space Mono',monospace; padding:16px; text-align:center; }
-  .filter-bar { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
-  .filter-input { background:#0e1821; border:1px solid #1e2d3d; color:#c8d6e5; font-family:'Space Mono',monospace; font-size:12px; padding:7px 12px; border-radius:4px; flex:1; min-width:180px; outline:none; }
-  .filter-input::placeholder { color:#2a3f55; }
-  .filter-input:focus { border-color:#00e5ff33; }
-  .filter-btn { background:#0e1821; border:1px solid #1e2d3d; color:#4a6278; font-size:11px; padding:7px 10px; border-radius:4px; cursor:pointer; white-space:nowrap; font-family:'Space Mono',monospace; }
-  .filter-btn.active { border-color:#00e5ff44; color:#00e5ff; background:#0a1a26; }
-  .table-wrap { overflow-x:auto; border:1px solid #1e2d3d; border-radius:10px; }
-  table { width:100%; border-collapse:collapse; min-width:900px; }
-  thead { background:#0c1620; position:sticky; top:0; z-index:1; }
-  th { font-family:'Space Mono',monospace; font-size:10px; font-weight:400; color:#4a6278; letter-spacing:1px; text-transform:uppercase; padding:10px 10px; text-align:left; border-bottom:1px solid #1e2d3d; cursor:pointer; white-space:nowrap; user-select:none; }
-  th:hover { color:#9fb3c8; }
-  tr.data-row { border-bottom:1px solid #0d1a25; transition:background 0.1s; }
-  tr.data-row:hover { background:#0e1821; }
-  tr.data-row.watched-row { border-left:2px solid #ffc94766; }
-  td { padding:8px 10px; white-space:nowrap; font-family:'Space Mono',monospace; font-size:11px; color:#c8d6e5; }
-  .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
-  .sa{background:#00e5ff;box-shadow:0 0 6px #00e5ff55;animation:pulse 2s infinite;}
-  .sg{background:#ffc947;}.ss{background:#ff4f5e;}
-  .status-cell { display:flex; align-items:center; }
-  .reg { color:#00e5ff; font-weight:700; letter-spacing:1px; }
-  .callsign { color:#9fb3c8; }
-  .type-code { color:#4a6278; }
-  .vu{color:#00e5ff;}.vd{color:#ffc947;}.vl{color:#2a3f55;}
-  .prox-badge { display:inline-block; font-size:9px; background:#00e5ff18; color:#00e5ff; border:1px solid #00e5ff33; border-radius:3px; padding:1px 5px; margin-left:4px; }
-  .at-badge   { display:inline-block; font-size:9px; background:#4cff9118; color:#4cff91; border:1px solid #4cff9133; border-radius:3px; padding:1px 5px; margin-left:4px; }
-  .watch-badge { display:inline-block; font-size:9px; background:#ffc94718; color:#ffc947; border:1px solid #ffc94733; border-radius:3px; padding:1px 4px; margin-left:4px; }
-  .ac-icon { font-size:14px; margin-right:4px; }
-  .adsbx-link { font-size:10px; color:#2a3f55; text-decoration:none; }
-  .adsbx-link:hover { color:#00e5ff; }
-  .seen-stale{color:#ff4f5e;}.seen-ok{color:#4a6278;}
-  .loading-msg { text-align:center; padding:36px; font-family:'Space Mono',monospace; font-size:12px; color:#2a3f55; }
-  .error-msg { text-align:center; padding:20px; color:#ff4f5e; font-size:12px; font-family:'Space Mono',monospace; }
-  .footer { margin-top:16px; text-align:center; font-family:'Space Mono',monospace; font-size:10px; color:#1e2d3d; padding-bottom:20px; }
-  @media(max-width:640px){.stats-bar{grid-template-columns:repeat(2,1fr);}.stat-value{font-size:18px;}}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Theme variables ── */
+:root {
+  --bg:       #060a10;
+  --bg2:      #0e1821;
+  --bg3:      #0c1620;
+  --border:   #1e2d3d;
+  --border2:  #2a3f55;
+  --text:     #c8d6e5;
+  --text2:    #9fb3c8;
+  --text3:    #4a6278;
+  --text4:    #2a3f55;
+  --accent:   #00e5ff;
+  --accentbg: #0a1a26;
+  --inputbg:  #060a10;
+  --rowbg:    #0e1821;
+  --chip:     #060a10;
+}
+body.light {
+  --bg:       #f0f4f8;
+  --bg2:      #ffffff;
+  --bg3:      #e8edf2;
+  --border:   #c8d6e5;
+  --border2:  #9fb3c8;
+  --text:     #1a2a3a;
+  --text2:    #2a4a6a;
+  --text3:    #4a6a8a;
+  --text4:    #8aabb8;
+  --accent:   #0077aa;
+  --accentbg: #e0f0ff;
+  --inputbg:  #ffffff;
+  --rowbg:    #f8fbff;
+  --chip:     #f4f8fc;
+}
+
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; transition: background 0.2s, color 0.2s; }
+#lock-screen { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; }
+.lock-logo { font-family:'Space Mono',monospace; font-size:18px; font-weight:700; color:var(--accent); letter-spacing:6px; margin-bottom:8px; }
+.lock-sub  { font-size:11px; color:var(--text4); letter-spacing:2px; text-transform:uppercase; margin-bottom:40px; font-family:'Space Mono',monospace; }
+.lock-box  { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:32px 40px; width:100%; max-width:360px; display:flex; flex-direction:column; gap:16px; }
+.lock-label { font-size:11px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; font-family:'Space Mono',monospace; margin-bottom:4px; }
+.lock-input { background:var(--bg); border:1px solid var(--border); color:var(--text); font-family:'Space Mono',monospace; font-size:14px; padding:12px 16px; border-radius:6px; width:100%; outline:none; letter-spacing:2px; }
+.lock-input:focus { border-color:var(--accent); }
+.lock-btn  { background:var(--accent); color:var(--bg); font-family:'Space Mono',monospace; font-size:12px; font-weight:700; padding:12px; border-radius:6px; border:none; cursor:pointer; letter-spacing:2px; }
+.lock-btn:hover { opacity:0.85; }
+.lock-error { font-family:'Space Mono',monospace; font-size:11px; color:#ff4f5e; text-align:center; min-height:16px; }
+#main-dash { display:none; padding:20px; max-width:1500px; margin:0 auto; }
+.header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:12px; }
+.header-left { display:flex; align-items:center; gap:12px; }
+.blade-logo { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; color:var(--accent); letter-spacing:4px; }
+.dash-title { font-size:12px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; }
+.header-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.live-dot { width:8px; height:8px; background:var(--accent); border-radius:50%; animation:pulse 2s infinite; flex-shrink:0; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+.last-updated { font-family:'Space Mono',monospace; font-size:11px; color:var(--text3); }
+.btn { background:var(--bg2); border:1px solid var(--border2); color:var(--accent); font-family:'Space Mono',monospace; font-size:11px; padding:6px 12px; border-radius:4px; cursor:pointer; white-space:nowrap; }
+.btn:hover { background:var(--bg3); }
+.btn.danger { color:#ff4f5e; border-color:#ff4f5e44; }
+.btn.danger:hover { background:#1a0e10; }
+.btn.success { color:#4cff91; border-color:#4cff9144; }
+.btn.success:hover { background:#0a1a10; }
+.btn.warn { color:#ffc947; border-color:#ffc94744; }
+.auto-label { font-size:11px; color:var(--text4); font-family:'Space Mono',monospace; }
+/* Theme toggle button */
+.theme-btn { background:var(--bg2); border:1px solid var(--border); color:var(--text3); font-size:14px; width:30px; height:30px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; transition:all 0.2s; }
+.theme-btn:hover { border-color:var(--accent); color:var(--accent); }
+.stats-bar { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:18px; }
+.stat-card { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:12px 16px; text-align:center; }
+.stat-label { font-size:10px; color:var(--text3); letter-spacing:1px; text-transform:uppercase; margin-bottom:5px; }
+.stat-value { font-family:'Space Mono',monospace; font-size:24px; font-weight:700; }
+.sw{color:var(--text);}.cy{color:var(--accent);}.ye{color:#ffc947;}.re{color:#ff4f5e;}.gr{color:#4cff91;}
+.panel { background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:16px 20px; margin-bottom:16px; }
+.panel-header { display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none; }
+.panel-title { font-family:'Space Mono',monospace; font-size:11px; color:var(--text3); letter-spacing:2px; text-transform:uppercase; display:flex; align-items:center; gap:8px; }
+.panel-arrow { font-family:'Space Mono',monospace; font-size:11px; color:var(--text4); }
+.panel-body { display:none; margin-top:14px; }
+.panel-body.open { display:block; }
+.search-row { display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+.tm-input { background:var(--inputbg); border:1px solid var(--border); color:var(--text); font-family:'Space Mono',monospace; font-size:12px; padding:8px 12px; border-radius:4px; outline:none; }
+.tm-input:focus { border-color:var(--accent); }
+.tm-input.hex { width:130px; text-transform:uppercase; }
+.tm-input.reg { width:130px; text-transform:uppercase; }
+.tm-input.lbl { width:180px; }
+.tm-input.bulk { width:100%; height:70px; resize:vertical; font-size:11px; margin-bottom:8px; }
+.tm-hint { font-size:10px; color:var(--text4); font-family:'Space Mono',monospace; margin-top:3px; }
+.search-result-card { background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:12px 16px; margin-top:10px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.src-reg   { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; color:var(--accent); }
+.src-type  { font-size:12px; color:var(--text2); }
+.src-owner { font-size:11px; color:var(--text3); flex:1; }
+.src-notfound { font-family:'Space Mono',monospace; font-size:12px; color:#ff4f5e; padding:10px 0; }
+.watch-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; max-height:220px; overflow-y:auto; margin-bottom:8px; }
+.watch-grid::-webkit-scrollbar { width:4px; }
+.watch-grid::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.watch-chip { background:var(--chip); border:1px solid var(--border); border-radius:6px; padding:8px 12px; display:flex; align-items:center; gap:10px; }
+.watch-chip.alert-on { border-color:#ffc94766; }
+.wc-icon { font-size:16px; flex-shrink:0; }
+.wc-info { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+.wc-reg  { font-family:'Space Mono',monospace; font-size:11px; font-weight:700; color:var(--accent); }
+.wc-lbl  { font-size:11px; color:var(--text3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wc-status { font-size:10px; font-family:'Space Mono',monospace; }
+.wc-status.air{color:var(--accent);}.wc-status.gnd{color:#ffc947;}.wc-status.no{color:var(--text4);}
+.wc-actions { display:flex; gap:4px; flex-shrink:0; }
+.wc-btn { background:none; border:none; font-size:12px; cursor:pointer; color:var(--text4); padding:0 2px; line-height:1; }
+.wc-btn:hover { color:#ff4f5e; }
+.wc-bell { color:#ffc947 !important; }
+.tail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:8px; max-height:240px; overflow-y:auto; }
+.tail-grid::-webkit-scrollbar { width:4px; }
+.tail-grid::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.tail-chip { background:var(--chip); border:1px solid var(--border); border-radius:6px; padding:8px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.tc-info { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.tc-hex { font-family:'Space Mono',monospace; font-size:11px; color:var(--accent); font-weight:700; letter-spacing:1px; }
+.tc-lbl { font-size:11px; color:var(--text3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tc-remove { background:none; border:none; color:var(--text4); cursor:pointer; font-size:14px; padding:0 2px; }
+.tc-remove:hover { color:#ff4f5e; }
+.tm-count { font-family:'Space Mono',monospace; font-size:10px; color:var(--text4); margin-top:8px; }
+.section-label { font-family:'Space Mono',monospace; font-size:10px; color:var(--text3); letter-spacing:2px; text-transform:uppercase; margin-bottom:10px; display:flex; align-items:center; gap:10px; }
+.section-label::after { content:''; flex:1; height:1px; background:var(--border); }
+.events-list { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow-y:auto; }
+.events-list::-webkit-scrollbar { width:4px; }
+.events-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.event-card { background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:9px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.event-card.departed { border-left:3px solid #ff8c42; }
+.event-card.arrived  { border-left:3px solid #4cff91; }
+.event-card.watched  { border-color:#ffc94766; }
+.ev-type { font-family:'Space Mono',monospace; font-size:11px; font-weight:700; letter-spacing:1px; min-width:72px; }
+.ev-type.dep{color:#ff8c42;}.ev-type.arr{color:#4cff91;}
+.ev-reg  { font-family:'Space Mono',monospace; font-size:12px; font-weight:700; color:var(--accent); min-width:65px; }
+.ev-loc  { font-size:12px; color:var(--text2); flex:1; }
+.ev-detail { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; }
+.ev-time { font-family:'Space Mono',monospace; font-size:10px; color:var(--text4); min-width:55px; text-align:right; }
+.no-events { font-size:12px; color:var(--text4); font-family:'Space Mono',monospace; padding:16px; text-align:center; }
+.filter-bar { display:flex; gap:8px; margin-bottom:12px; align-items:center; flex-wrap:wrap; }
+.filter-input { background:var(--bg2); border:1px solid var(--border); color:var(--text); font-family:'Space Mono',monospace; font-size:12px; padding:7px 12px; border-radius:4px; flex:1; min-width:180px; outline:none; }
+.filter-input::placeholder { color:var(--text4); }
+.filter-input:focus { border-color:var(--accent); }
+.filter-btn { background:var(--bg2); border:1px solid var(--border); color:var(--text3); font-size:11px; padding:7px 10px; border-radius:4px; cursor:pointer; white-space:nowrap; font-family:'Space Mono',monospace; }
+.filter-btn.active { border-color:var(--accent); color:var(--accent); background:var(--accentbg); }
+.table-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:10px; }
+table { width:100%; border-collapse:collapse; min-width:900px; }
+thead { background:var(--bg3); position:sticky; top:0; z-index:1; }
+th { font-family:'Space Mono',monospace; font-size:10px; font-weight:400; color:var(--text3); letter-spacing:1px; text-transform:uppercase; padding:10px 10px; text-align:left; border-bottom:1px solid var(--border); cursor:pointer; white-space:nowrap; user-select:none; }
+th:hover { color:var(--text2); }
+tr.data-row { border-bottom:1px solid var(--border); transition:background 0.1s; }
+tr.data-row:hover { background:var(--rowbg); }
+tr.data-row.watched-row { border-left:2px solid #ffc94766; }
+td { padding:8px 10px; white-space:nowrap; font-family:'Space Mono',monospace; font-size:11px; color:var(--text); }
+.status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+.sa{background:#00e5ff;box-shadow:0 0 6px #00e5ff55;animation:pulse 2s infinite;}
+.sg{background:#ffc947;}.ss{background:#ff4f5e;}
+.status-cell { display:flex; align-items:center; }
+.reg      { color:var(--accent); font-weight:700; letter-spacing:1px; }
+.callsign { color:var(--text2); }
+.type-code { color:var(--text3); }
+.vu{color:#00e5ff;}.vd{color:#ffc947;}.vl{color:var(--text4);}
+.prox-badge { display:inline-block; font-size:9px; background:#00e5ff18; color:#00e5ff; border:1px solid #00e5ff33; border-radius:3px; padding:1px 5px; margin-left:4px; }
+.at-badge   { display:inline-block; font-size:9px; background:#4cff9118; color:#4cff91; border:1px solid #4cff9133; border-radius:3px; padding:1px 5px; margin-left:4px; }
+.watch-badge { display:inline-block; font-size:9px; background:#ffc94718; color:#ffc947; border:1px solid #ffc94733; border-radius:3px; padding:1px 4px; margin-left:4px; }
+.ac-icon { font-size:14px; margin-right:4px; }
+.adsbx-link { font-size:10px; color:var(--text4); text-decoration:none; }
+.adsbx-link:hover { color:var(--accent); }
+.seen-stale{color:#ff4f5e;}.seen-ok{color:var(--text3);}
+.loading-msg { text-align:center; padding:36px; font-family:'Space Mono',monospace; font-size:12px; color:var(--text4); }
+.error-msg  { text-align:center; padding:20px; color:#ff4f5e; font-size:12px; font-family:'Space Mono',monospace; }
+.retry-msg  { text-align:center; padding:20px; color:#ffc947; font-size:12px; font-family:'Space Mono',monospace; }
+.footer { margin-top:16px; text-align:center; font-family:'Space Mono',monospace; font-size:10px; color:var(--border); padding-bottom:20px; }
+@media(max-width:640px){.stats-bar{grid-template-columns:repeat(2,1fr);}.stat-value{font-size:18px;}}
 </style>
 </head>
 <body>
-
 <div id="lock-screen">
   <div class="lock-logo">BLADE</div>
   <div class="lock-sub">Fleet Ops — Restricted Access</div>
@@ -151,23 +189,22 @@
     <div class="lock-error" id="pw-error"></div>
   </div>
 </div>
-
 <div id="main-dash">
   <div class="header">
     <div class="header-left">
       <span class="blade-logo">BLADE</span>
-      <span style="color:#1e2d3d;font-size:18px">|</span>
+      <span style="color:var(--border);font-size:18px">|</span>
       <span class="dash-title">Fleet Ops — Live Tail Tracker</span>
     </div>
     <div class="header-right">
-      <span class="auto-label">Auto: 60s</span>
+      <span class="auto-label" id="auto-label-txt">Auto: 60s</span>
       <div class="live-dot"></div>
       <span class="last-updated" id="last-updated">—</span>
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle light/dark theme">☀️</button>
       <button class="btn" onclick="loadData()">↺ Refresh</button>
       <button class="btn danger" onclick="logout()">Lock</button>
     </div>
   </div>
-
   <div class="stats-bar">
     <div class="stat-card"><div class="stat-label">Total Tails</div><div class="stat-value sw" id="stat-total">—</div></div>
     <div class="stat-card"><div class="stat-label">Airborne</div><div class="stat-value cy" id="stat-airborne">—</div></div>
@@ -175,7 +212,6 @@
     <div class="stat-card"><div class="stat-label">No Signal</div><div class="stat-value re" id="stat-stale">—</div></div>
     <div class="stat-card"><div class="stat-label">At Helipad / Airport</div><div class="stat-value gr" id="stat-prox">—</div></div>
   </div>
-
   <!-- SEARCH ANY TAIL -->
   <div class="panel">
     <div class="panel-header" onclick="togglePanel('search-panel','search-arrow')">
@@ -185,14 +221,13 @@
     <div class="panel-body" id="search-panel">
       <div class="search-row">
         <div style="display:flex;flex-direction:column;gap:3px">
-          <input class="tm-input" id="any-query" placeholder="N-number or ICAO hex (e.g. N12345 or A1B2C3)"
-            oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')searchAnyTail()">
+          <input class="tm-input" id="any-query" placeholder="N-number or ICAO hex (e.g. N12345 or A1B2C3)" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')searchAnyTail()">
           <button class="btn" onclick="searchAnyTail()">SEARCH</button>
         </div>
-      <div id="search-result"></div>
+        <div id="search-result"></div>
+      </div>
     </div>
   </div>
-
   <!-- WATCHLIST -->
   <div class="panel">
     <div class="panel-header" onclick="togglePanel('watch-panel','watch-arrow')">
@@ -205,7 +240,6 @@
       </div>
     </div>
   </div>
-
   <!-- FLEET MANAGER -->
   <div class="panel">
     <div class="panel-header" onclick="togglePanel('tail-panel','tail-arrow')">
@@ -215,8 +249,7 @@
     <div class="panel-body" id="tail-panel">
       <div class="search-row" style="margin-bottom:12px">
         <div style="display:flex;flex-direction:column;gap:3px">
-          <input class="tm-input hex" id="add-hex" placeholder="ICAO HEX" maxlength="6"
-            oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')addTail()">
+          <input class="tm-input hex" id="add-hex" placeholder="ICAO HEX" maxlength="6" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')addTail()">
           <div class="tm-hint">e.g. A5818B</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:3px">
@@ -237,7 +270,6 @@
       <div class="tm-count" id="tm-count"></div>
     </div>
   </div>
-
   <!-- EVENTS -->
   <div style="margin-bottom:16px">
     <div class="section-label">Depart / Arrive Events</div>
@@ -245,7 +277,6 @@
       <div class="no-events">Waiting for first sweep...</div>
     </div>
   </div>
-
   <!-- FILTER + TABLE -->
   <div class="filter-bar">
     <input class="filter-input" id="search-box" placeholder="Filter by reg, callsign, type, location..." oninput="renderTable()">
@@ -255,7 +286,6 @@
     <button class="filter-btn"        id="btn-prox"     onclick="setFilter('prox')">At Helipad</button>
     <button class="filter-btn"        id="btn-watch"    onclick="setFilter('watch')">Watched</button>
   </div>
-
   <div class="table-wrap">
     <table>
       <thead>
@@ -279,17 +309,28 @@
       </tbody>
     </table>
   </div>
-
   <div class="footer">Data: opensky-network.org / adsbdb.com &middot; Auto-refreshes every 60s &middot; BLADE Ground Connect Ops</div>
 </div>
-
 <script>
+// ── Theme toggle ──
+function toggleTheme(){
+  const isLight=document.body.classList.toggle('light');
+  localStorage.setItem('blade_theme',isLight?'light':'dark');
+  document.getElementById('theme-btn').textContent=isLight?'🌙':'☀️';
+}
+(function applyTheme(){
+  const t=localStorage.getItem('blade_theme');
+  if(t==='light'){document.body.classList.add('light');const b=document.getElementById('theme-btn');if(b)b.textContent='🌙';}
+})();
+
 const PW='heybuddy';
 function checkPw(){
   if(document.getElementById('pw-input').value===PW){
     sessionStorage.setItem('blade_auth','1');
     document.getElementById('lock-screen').style.display='none';
     document.getElementById('main-dash').style.display='block';
+    // Apply theme icon after dash is shown
+    if(localStorage.getItem('blade_theme')==='light')document.getElementById('theme-btn').textContent='🌙';
     init();
   }else{
     const e=document.getElementById('pw-error');
@@ -309,13 +350,12 @@ function getAcIcon(ac){
   const t=(ac.t||'').toUpperCase();
   const desc=(ac.desc||'').toUpperCase();
   if(desc.includes('HELICOPTER')||desc.includes('ROTOR')||/^H/.test(t)||
-     ['R22','R44','R66','B06','B07','B212','B222','B407','B412','B427','B429','B430',
-      'EC20','EC25','EC35','EC45','EC55','EC75','H125','H130','H135','H145','H155','H160',
-      'AS50','AS55','AW09','AW13','AW16','AW17','AW18','AW19','S76','S300','S369',
-      'MD52','MD60'].some(h=>t.startsWith(h)))
-    return '\u{1F681}'; // helicopter
-  if(desc.includes('BALLOON')||desc.includes('AIRSHIP'))return '\u{1F388}';
-  return '\u2708\uFE0F'; // fixed wing default
+    ['R22','R44','R66','B06','B07','B212','B222','B407','B412','B427','B429','B430',
+     'EC20','EC25','EC35','EC45','EC55','EC75','H125','H130','H135','H145','H155','H160',
+     'AS50','AS55','AW09','AW13','AW16','AW17','AW18','AW19','S76','S300','S369',
+     'MD52','MD60'].some(h=>t.startsWith(h))) return '🚁';
+  if(desc.includes('BALLOON')||desc.includes('AIRSHIP'))return '🎈';
+  return '✈️';
 }
 
 // Locations
@@ -383,7 +423,6 @@ let tails=loadTails();
 function loadWatchlist(){try{const s=localStorage.getItem('blade_watchlist');return s?JSON.parse(s):[];}catch(e){return[];}}
 function saveWatchlist(){localStorage.setItem('blade_watchlist',JSON.stringify(watchlist));}
 let watchlist=loadWatchlist();
-
 function addToWatchlist(hex,label){
   hex=hex.toLowerCase();
   if(watchlist.find(w=>w.hex===hex)){alert('Already on watchlist');return;}
@@ -409,82 +448,67 @@ function renderWatchlist(){
   grid.innerHTML=watchlist.map(w=>{
     const live=allData.find(ac=>ac.hex===w.hex);
     const status=live?getStatus(live):'offline';
-    const icon=live?getAcIcon(live):'\u2708\uFE0F';
-    const statusLabel=status==='airborne'?'\u25b2 Airborne':status==='ground'?'\u25cf On Ground':'\u25cb No Signal';
+    const icon=live?getAcIcon(live):'✈️';
+    const statusLabel=status==='airborne'?'▲ Airborne':status==='ground'?'● On Ground':'○ No Signal';
     const statusCls=status==='airborne'?'air':status==='ground'?'gnd':'no';
     const alt=live&&typeof live.alt_baro==='number'?Math.round(live.alt_baro).toLocaleString()+' ft':live&&live.alt_baro==='ground'?'Ground':'--';
-    return'<div class="watch-chip'+(w.alert?' alert-on':'')+'">'+
-      '<span class="wc-icon">'+icon+'</span>'+
-      '<div class="wc-info">'+
-        '<span class="wc-reg">'+(live?live.r||w.hex.toUpperCase():w.hex.toUpperCase()).trim()+'</span>'+
-        '<span class="wc-lbl">'+w.label+'</span>'+
-        '<span class="wc-status '+statusCls+'">'+statusLabel+(status==='airborne'?' \u00b7 '+alt:'')+'</span>'+
-      '</div>'+
-      '<div class="wc-actions">'+
-        '<button class="wc-btn'+(w.alert?' wc-bell':'')+'" onclick="toggleWatchAlert(\''+w.hex+'\')" title="Toggle alerts">\uD83D\uDD14</button>'+
-        '<button class="wc-btn" onclick="removeFromWatchlist(\''+w.hex+'\')" title="Remove">\u2715</button>'+
-      '</div>'+
-    '</div>';
+    return'<div class="watch-chip'+(w.alert?' alert-on':'')+'">'
+      +'<span class="wc-icon">'+icon+'</span>'
+      +'<div class="wc-info">'
+      +'<span class="wc-reg">'+(live?live.r||w.hex.toUpperCase():w.hex.toUpperCase()).trim()+'</span>'
+      +'<span class="wc-lbl">'+w.label+'</span>'
+      +'<span class="wc-status '+statusCls+'">'+statusLabel+(status==='airborne'?' · '+alt:'')+'</span>'
+      +'</div>'
+      +'<div class="wc-actions">'
+      +'<button class="wc-btn'+(w.alert?' wc-bell':'')+'" onclick="toggleWatchAlert(''+w.hex+'')" title="Toggle alerts">🔔</button>'
+      +'<button class="wc-btn" onclick="removeFromWatchlist(''+w.hex+'')" title="Remove">✕</button>'
+      +'</div>'
+      +'</div>';
   }).join('');
 }
-
-// Search any tail using OpenSky (live) + adsbdb (static)
+// Search any tail
 let lastSearchResult=null;
 async function searchAnyTail(){
   const raw=(document.getElementById('any-query')||{value:''}).value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(!raw){showAlert('Enter an N-number or ICAO hex code','warn');return;}
+  if(!raw){return;}
   const isHex=/^[0-9A-F]{6}$/.test(raw);
   const resultEl=document.getElementById('search-result');
-  resultEl.innerHTML='<span style="color:#4a6278">Searching...</span>';
+  resultEl.innerHTML='<span style="color:var(--text3)">Searching...</span>';
   if(isHex){
     const hex=raw;
-    const existing=_tails.find(t=>t.hex===hex);
+    const existing=tails.find(t=>t.hex===hex.toLowerCase());
     if(existing){resultEl.innerHTML='<span class="gr">Found in fleet: '+hex+'</span>';return;}
-    fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase()).then(r=>r.json()).then(data=>{
-      if(!data.states||!data.states.length){resultEl.innerHTML='<span class="re">No live data for '+hex+'</span>';return;}
-      const ac=openskyToAc(data.states[0]);
-      resultEl.innerHTML='<span class="gr">'+hex+': '+ac.flight.trim()+'  Alt:'+ac.alt_baro+'ft  Spd:'+ac.gs+'kt</span>';
-    }).catch(e=>resultEl.innerHTML='<span class="re">Error: '+e.message+'</span>');
+    fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase())
+      .then(r=>r.json()).then(data=>{
+        if(!data.states||!data.states.length){resultEl.innerHTML='<span class="re">No live data for '+hex+'</span>';return;}
+        const ac=openskyToAc(data.states[0]);
+        resultEl.innerHTML='<span class="gr">'+hex+': '+ac.flight.trim()+' Alt:'+ac.alt_baro+'ft Spd:'+ac.gs+'kt</span>';
+      }).catch(e=>resultEl.innerHTML='<span class="re">Error: '+e.message+'</span>');
   } else {
     const reg=raw;
     fetch('https://api.adsbdb.com/v0/aircraft/'+reg).then(r=>r.json()).then(data=>{
       if(!data.response||!data.response.aircraft){resultEl.innerHTML='<span class="re">No data for '+reg+'</span>';return;}
       const info=data.response.aircraft;
       const hex=(info.mode_s||'').toUpperCase();
-      resultEl.innerHTML='<span class="gr">'+reg+' → '+hex+'  '+info.type+' / '+(info.registered_owner||'')+'</span>';
+      resultEl.innerHTML='<span class="gr">'+reg+' → '+hex+' '+info.type+' / '+(info.registered_owner||'')+'</span>';
       if(hex){
-        fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase()).then(r=>r.json()).then(liveData=>{
-          if(liveData.states&&liveData.states.length){
-            const ac=openskyToAc(liveData.states[0]);
-            resultEl.innerHTML+='<br><span class="gr">Live: Alt:'+ac.alt_baro+'ft  Spd:'+ac.gs+'kt  Hdg:'+ac.track+'°</span>';
-          }
-        }).catch(()=>{});
+        fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase())
+          .then(r=>r.json()).then(liveData=>{
+            if(liveData.states&&liveData.states.length){
+              const ac=openskyToAc(liveData.states[0]);
+              resultEl.innerHTML+='<br><span class="gr">Live: Alt:'+ac.alt_baro+'ft Spd:'+ac.gs+'kt Hdg:'+ac.track+'°</span>';
+            }
+          }).catch(()=>{});
       }
     }).catch(e=>resultEl.innerHTML='<span class="re">Error: '+e.message+'</span>');
   }
-}
-function addFromSearch(){
-  if(!lastSearchResult)return;
-  const ac=lastSearchResult,hex=ac.hex.toLowerCase();
-  if(tails.find(t=>t.hex===hex)){document.getElementById('add-from-search-btn').textContent='\u2713 In Fleet';return;}
-  const label=(ac.r||'').trim()||hex.toUpperCase();
-  tails.push({hex,label});saveTails();renderTailGrid();loadData();
-  document.getElementById('add-from-search-btn').textContent='\u2713 In Fleet';
-}
-function watchFromSearch(){
-  if(!lastSearchResult)return;
-  const ac=lastSearchResult,hex=ac.hex.toLowerCase();
-  if(watchlist.find(w=>w.hex===hex)){document.getElementById('watch-from-search-btn').textContent='\u2605 Watching';return;}
-  const label=(ac.r||'').trim()||hex.toUpperCase();
-  addToWatchlist(hex,label);
-  document.getElementById('watch-from-search-btn').textContent='\u2605 Watching';
 }
 
 // Tail manager
 function renderTailGrid(){
   document.getElementById('tail-grid').innerHTML=tails.map((t,i)=>
-    '<div class="tail-chip"><div class="tc-info"><span class="tc-hex">'+t.hex.toUpperCase()+'</span><span class="tc-lbl">'+(t.label||'--')+'</span></div>'+
-    '<button class="tc-remove" onclick="removeTail('+i+')">\u2715</button></div>'
+    '<div class="tail-chip"><div class="tc-info"><span class="tc-hex">'+t.hex.toUpperCase()+'</span><span class="tc-lbl">'+(t.label||'--')+'</span></div>'
+    +'<button class="tc-remove" onclick="removeTail('+i+')">✕</button></div>'
   ).join('');
   document.getElementById('tm-count').textContent=tails.length+' tails tracked';
 }
@@ -504,10 +528,11 @@ function removeTail(i){
   allData=allData.filter(ac=>ac.hex!==t.hex);renderTable();updateStats();
 }
 function bulkAdd(){
-  const tokens=document.getElementById('bulk-input').value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+  const tokens=document.getElementById('bulk-input').value.split(/[
+,]+/).map(s=>s.trim()).filter(Boolean);
   let added=0,skipped=0;
   tokens.forEach(tok=>{
-    const parts=tok.split(/\s+/),hex=parts[0].toLowerCase().replace(/[^a-f0-9]/g,''),label=parts.slice(1).join(' ');
+    const parts=tok.split(/s+/),hex=parts[0].toLowerCase().replace(/[^a-f0-9]/g,''),label=parts.slice(1).join(' ');
     if(hex.length===6&&!tails.find(t=>t.hex===hex)){tails.push({hex,label});added++;}else skipped++;
   });
   saveTails();renderTailGrid();document.getElementById('bulk-input').value='';toggleBulk();
@@ -518,7 +543,7 @@ function toggleBulk(){const b=document.getElementById('bulk-area');b.style.displ
 function togglePanel(bodyId,arrowId){
   const body=document.getElementById(bodyId),arrow=document.getElementById(arrowId);
   body.classList.toggle('open');
-  arrow.textContent=body.classList.contains('open')?'\u25b2 collapse':'\u25bc expand';
+  arrow.textContent=body.classList.contains('open')?'▲ collapse':'▼ expand';
 }
 
 // Status helpers
@@ -535,8 +560,8 @@ function fmtAlt(ac){if(ac.alt_baro==='ground')return'Ground';if(typeof ac.alt_ba
 function fmtVR(ac){
   if(ac.baro_rate==null)return'<span class="vl">--</span>';
   const r=Math.round(ac.baro_rate);
-  if(r>100)return'<span class="vu">\u25b2 '+fmt(r)+' fpm</span>';
-  if(r<-100)return'<span class="vd">\u25bc '+fmt(Math.abs(r))+' fpm</span>';
+  if(r>100)return'<span class="vu">▲ '+fmt(r)+' fpm</span>';
+  if(r<-100)return'<span class="vd">▼ '+fmt(Math.abs(r))+' fpm</span>';
   return'<span class="vl">Level</span>';
 }
 function fmtSeen(s){if(s==null)return'--';const sec=Math.round(s);return sec<60?sec+'s':Math.floor(sec/60)+'m '+(sec%60)+'s';}
@@ -571,20 +596,20 @@ function pushEvent(type,reg,locName,dist,ac,watched){
 }
 function renderEvents(){
   const el=document.getElementById('events-list');
-  if(!events.length){el.innerHTML='<div class="no-events">No events yet \u2014 monitoring active</div>';return;}
+  if(!events.length){el.innerHTML='<div class="no-events">No events yet — monitoring active</div>';return;}
   el.innerHTML=events.map(ev=>{
     const cls=ev.type==='DEPARTED'?'departed':'arrived';
     const tc=ev.type==='DEPARTED'?'dep':'arr';
-    const lbl=ev.type==='DEPARTED'?'\u2191 DEPART':'\u2193 ARRIVE';
-    return'<div class="event-card '+cls+(ev.watched?' watched':'')+'">'+
-      '<span class="ev-type '+tc+'">'+lbl+'</span>'+
-      '<span style="font-size:14px">'+ev.icon+'</span>'+
-      '<span class="ev-reg">'+ev.reg+'</span>'+
-      '<span class="ev-loc">'+ev.locName+(ev.callsign?' \u00b7 '+ev.callsign:'')+'</span>'+
-      '<span class="ev-detail">'+ev.alt+' \u00b7 '+ev.dist+' nm</span>'+
-      (ev.watched?'<span class="watch-badge">\u2605 watched</span>':'')+
-      '<span class="ev-time">'+ev.time+'</span>'+
-    '</div>';
+    const lbl=ev.type==='DEPARTED'?'↑ DEPART':'↓ ARRIVE';
+    return'<div class="event-card '+cls+(ev.watched?' watched':'')+'">'
+      +'<span class="ev-type '+tc+'">'+lbl+'</span>'
+      +'<span style="font-size:14px">'+ev.icon+'</span>'
+      +'<span class="ev-reg">'+ev.reg+'</span>'
+      +'<span class="ev-loc">'+ev.locName+(ev.callsign?' · '+ev.callsign:'')+'</span>'
+      +'<span class="ev-detail">'+ev.alt+' · '+ev.dist+' nm</span>'
+      +(ev.watched?'<span class="watch-badge">★ watched</span>':'')
+      +'<span class="ev-time">'+ev.time+'</span>'
+      +'</div>';
   }).join('');
 }
 
@@ -636,26 +661,26 @@ function renderTable(){
     const locName=n?n.loc.name:'--';
     const locDist=n?n.dist.toFixed(1)+' nm':'--';
     const badge=isN?(s==='ground'?'<span class="at-badge">AT</span>':'<span class="prox-badge">NEAR</span>'):'';
-    const wBadge=ac._watched?'<span class="watch-badge">\u2605</span>':'';
+    const wBadge=ac._watched?'<span class="watch-badge">★</span>':'';
     const sc=ac.seen>60?'seen-stale':'seen-ok';
     const altClr=typeof ac.alt_baro==='number'&&ac.baro_rate>200?'color:#00e5ff':typeof ac.alt_baro==='number'&&ac.baro_rate<-200?'color:#ffc947':'';
     const icon=getAcIcon(ac);
     const reg=(ac.r||ac.hex.toUpperCase()).trim();
-    const labelStr=ac._label?'<span style="color:#2a3f55;font-size:9px;display:block">'+ac._label+'</span>':'';
-    return'<tr class="data-row'+(ac._watched?' watched-row':'')+'">'+
-      '<td><div class="status-cell"><span class="status-dot '+dc+'"></span>'+sl+'</div></td>'+
-      '<td><span class="reg">'+reg+'</span>'+wBadge+labelStr+'</td>'+
-      '<td><span class="callsign">'+(ac.flight||'--').trim()+'</span></td>'+
-      '<td><span class="ac-icon">'+icon+'</span><span class="type-code">'+(ac.t||'--')+'</span></td>'+
-      '<td style="'+altClr+'">'+fmtAlt(ac)+'</td>'+
-      '<td>'+fmt(ac.gs)+'</td>'+
-      '<td>'+fmtVR(ac)+'</td>'+
-      '<td>'+(ac.squawk||'--')+'</td>'+
-      '<td>'+locName+badge+'</td>'+
-      '<td>'+locDist+'</td>'+
-      '<td><span class="'+sc+'">'+fmtSeen(ac.seen)+'</span></td>'+
-      '<td><a class="adsbx-link" href="https://globe.adsbexchange.com/?icao='+icaoParam+'" target="_blank">\u2197</a></td>'+
-    '</tr>';
+    const labelStr=ac._label?'<span style="color:var(--text4);font-size:9px;display:block">'+ac._label+'</span>':'';
+    return'<tr class="data-row'+(ac._watched?' watched-row':'')+'">'
+      +'<td><div class="status-cell"><span class="status-dot '+dc+'"></span>'+sl+'</div></td>'
+      +'<td><span class="reg">'+reg+'</span>'+wBadge+labelStr+'</td>'
+      +'<td><span class="callsign">'+(ac.flight||'--').trim()+'</span></td>'
+      +'<td><span class="ac-icon">'+icon+'</span><span class="type-code">'+(ac.t||'--')+'</span></td>'
+      +'<td style="'+altClr+'">'+fmtAlt(ac)+'</td>'
+      +'<td>'+fmt(ac.gs)+'</td>'
+      +'<td>'+fmtVR(ac)+'</td>'
+      +'<td>'+(ac.squawk||'--')+'</td>'
+      +'<td>'+locName+badge+'</td>'
+      +'<td>'+locDist+'</td>'
+      +'<td><span class="'+sc+'">'+fmtSeen(ac.seen)+'</span></td>'
+      +'<td><a class="adsbx-link" href="https://globe.adsbexchange.com/?icao='+icaoParam+'" target="_blank">↗</a></td>'
+      +'</tr>';
   }).join('');
 }
 function updateStats(){
@@ -667,8 +692,6 @@ function updateStats(){
   document.getElementById('stat-stale').textContent=statuses.filter(s=>s==='stale').length+(tails.length-allData.length);
   document.getElementById('stat-prox').textContent=proxCount;
 }
-
-// Data fetch using OpenSky Network (CORS-enabled)
 // Static aircraft registration info cached via adsbdb.com
 const _regCache={};
 async function fetchRegInfo(hex){
@@ -692,27 +715,50 @@ function openskyToAc(sv,regInfo){
   return{
     hex:sv[0].toLowerCase(),
     flight:(sv[1]||'').trim(),
-    lat:sv[6],
-    lon:sv[5],
-    alt_baro:altFt,
-    gs:gs,
-    baro_rate:vr,
-    squawk:sv[14]||'',
-    seen:seenAgo,
+    lat:sv[6], lon:sv[5],
+    alt_baro:altFt, gs:gs, baro_rate:vr,
+    squawk:sv[14]||'', seen:seenAgo,
     r:regInfo?regInfo.r:'',
     t:regInfo?regInfo.t:'',
     desc:regInfo?regInfo.desc:'',
     ownOp:regInfo?regInfo.ownOp:'',
   };
 }
+
+// ── 429 Rate-limit handling ──
+// When OpenSky returns 429, back off and retry with increasing intervals.
+// We keep track of last successful data and display it with a warning.
+let _429BackoffMs = 0;          // current extra wait before next fetch (ms)
+let _rateLimitTimer = null;      // timer ID for scheduled retry
+let _autoIntervalId = null;      // main 60s polling interval
+const BASE_INTERVAL = 60000;    // 60 s normal poll
+const BACKOFF_STEPS = [60, 120, 180, 300]; // seconds to wait after 429
+
+function setAutoLabel(txt){
+  const el=document.getElementById('auto-label-txt');
+  if(el)el.textContent=txt;
+}
+
 async function loadData(){
+  // Clear any pending backoff retry timer (manual refresh cancels it)
+  if(_rateLimitTimer){clearTimeout(_rateLimitTimer);_rateLimitTimer=null;}
+
   document.getElementById('last-updated').textContent='Fetching...';
   const hexList=tails.map(t=>t.hex.toLowerCase());
   const params=hexList.map(h=>'icao24='+h).join('&');
   const url='https://opensky-network.org/api/states/all?'+params;
   try{
     const res=await fetch(url,{signal:AbortSignal.timeout(15000)});
+    if(res.status===429){
+      // Rate limited — schedule a retry with backoff
+      handleRateLimit();
+      return;
+    }
     if(!res.ok)throw new Error('OpenSky HTTP '+res.status);
+    // Success — reset backoff
+    _429BackoffMs=0;
+    setAutoLabel('Auto: 60s');
+
     const json=await res.json();
     const states=json.states||[];
     const fresh=states.map(sv=>{
@@ -723,17 +769,18 @@ async function loadData(){
     hexList.forEach(hex=>{
       if(!foundHexes.has(hex)){
         const reg=_regCache[hex]||null;
-        fresh.push({hex,flight:'',lat:null,lon:null,alt_baro:null,gs:null,baro_rate:null,squawk:'',seen:999,r:reg?reg.r:'',t:reg?reg.t:'',desc:reg?reg.desc:'',ownOp:''});
+        fresh.push({hex,flight:'',lat:null,lon:null,alt_baro:null,gs:null,baro_rate:null,squawk:'',seen:999,
+          r:reg?reg.r:'',t:reg?reg.t:'',desc:reg?reg.desc:'',ownOp:''});
       }
     });
-    // Fetch missing reg info in background (staggered) and auto-label
+    // Fetch missing reg info in background (staggered)
     const missingReg=hexList.filter(h=>!_regCache[h]);
     if(missingReg.length>0){
       missingReg.forEach((hex,i)=>setTimeout(()=>{
         fetchRegInfo(hex).then(info=>{
           if(!info)return;
-          const tail=_tails.find(t=>t.hex===hex);
-          if(tail&&!tail.label&&info.r){tail.label=info.r;saveTails();renderAll();}
+          const tail=tails.find(t=>t.hex===hex);
+          if(tail&&!tail.label&&info.r){tail.label=info.r;saveTails();renderTailGrid();}
         });
       },i*200));
     }
@@ -749,10 +796,48 @@ async function loadData(){
     document.getElementById('last-updated').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }catch(e){
     document.getElementById('last-updated').textContent='Error: '+e.message;
-    document.getElementById('table-body').innerHTML='<tr><td colspan="12" class="error-msg">Fetch failed: '+e.message+'</td></tr>';
+    // Only show error row if we have no existing data
+    if(!allData.length){
+      document.getElementById('table-body').innerHTML='<tr><td colspan="12" class="error-msg">Fetch failed: '+e.message+'</td></tr>';
+    }
   }
 }
-function init(){renderTailGrid();renderWatchlist();loadData();setInterval(loadData,60000);}
+
+function handleRateLimit(){
+  // Pick next backoff step
+  const stepIdx=Math.min(Math.floor(_429BackoffMs/60000), BACKOFF_STEPS.length-1);
+  const waitSec=BACKOFF_STEPS[Math.max(stepIdx,0)];
+  _429BackoffMs=waitSec*1000;
+
+  // Show warning in header; keep stale data in table
+  document.getElementById('last-updated').textContent='Rate limited (429) — retry in '+waitSec+'s';
+  if(!allData.length){
+    document.getElementById('table-body').innerHTML
+      ='<tr><td colspan="12" class="retry-msg">OpenSky rate limit (HTTP 429) — retrying in '+waitSec+'s&hellip;</td></tr>';
+  }
+  setAutoLabel('Retry: '+waitSec+'s');
+
+  // Count down visually
+  let remaining=waitSec;
+  const tick=setInterval(()=>{
+    remaining--;
+    if(remaining<=0){clearInterval(tick);return;}
+    document.getElementById('last-updated').textContent='Rate limited (429) — retry in '+remaining+'s';
+    setAutoLabel('Retry: '+remaining+'s');
+  },1000);
+
+  // Schedule retry
+  _rateLimitTimer=setTimeout(()=>{
+    clearInterval(tick);
+    setAutoLabel('Auto: 60s');
+    loadData();
+  },waitSec*1000);
+}
+
+function init(){
+  renderTailGrid();renderWatchlist();loadData();
+  _autoIntervalId=setInterval(loadData,BASE_INTERVAL);
+}
 if(sessionStorage.getItem('blade_auth')==='1')init();
 </script>
 </body>
