@@ -748,9 +748,9 @@ async function loadData(){
   const url='https://opensky-network.org/api/states/all?icao24='+params;
   try{
     const res=await fetch(url,{signal:AbortSignal.timeout(15000)});
-    if(res.status===429){
+    if(res.status===429||res.status===503){
       // Rate limited — schedule a retry with backoff
-      handleRateLimit();
+      handleRateLimit(res.status);
       return;
     }
     if(!res.ok)throw new Error('OpenSky HTTP '+res.status);
@@ -794,25 +794,26 @@ async function loadData(){
     updateStats();renderTable();renderEvents();renderWatchlist();
     document.getElementById('last-updated').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }catch(e){
-    document.getElementById('last-updated').textContent='Error: '+e.message;
+    const errMsg=e.name==='TimeoutError'?'Request timed out':e.message==='Failed to fetch'?'Network error (API unreachable)':'Error: '+e.message;
+      document.getElementById('last-updated').textContent=errMsg;
     // Only show error row if we have no existing data
     if(!allData.length){
-      document.getElementById('table-body').innerHTML='<tr><td colspan="12" class="error-msg">Fetch failed: '+e.message+'</td></tr>';
+      document.getElementById('table-body').innerHTML='<tr><td colspan="12" class="error-msg">'+(e.message==="Failed to fetch"?"ADS-B data unavailable — API unreachable. Will retry automatically.":"Fetch failed: "+e.message)+'</td></tr>';
     }
   }
 }
 
-function handleRateLimit(){
+function handleRateLimit(statusCode){
   // Pick next backoff step
   const stepIdx=Math.min(Math.floor(_429BackoffMs/60000), BACKOFF_STEPS.length-1);
   const waitSec=BACKOFF_STEPS[Math.max(stepIdx,0)];
   _429BackoffMs=waitSec*1000;
 
   // Show warning in header; keep stale data in table
-  document.getElementById('last-updated').textContent='Rate limited (429) — retry in '+waitSec+'s';
+  document.getElementById('last-updated').textContent=(statusCode===503?'Server unavailable (503)':'Rate limited (429)')+' — retry in '+waitSec+'s';
   if(!allData.length){
     document.getElementById('table-body').innerHTML
-      ='<tr><td colspan="12" class="retry-msg">OpenSky rate limit (HTTP 429) — retrying in '+waitSec+'s&hellip;</td></tr>';
+      ='<tr><td colspan="12" class="retry-msg">'+(statusCode===503?'ADS-B server unavailable (HTTP 503)':'OpenSky rate limit (HTTP 429)')+' — retrying in '+waitSec+'s&hellip;</td></tr>';
   }
   setAutoLabel('Retry: '+waitSec+'s');
 
