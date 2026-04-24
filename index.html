@@ -478,7 +478,7 @@ async function searchAnyTail(){
     const hex=raw;
     const existing=tails.find(t=>t.hex===hex.toLowerCase());
     if(existing){resultEl.innerHTML='<span class="gr">Found in fleet: '+hex+'</span>';return;}
-    fetch('https://opensky-network.org/api/states/all?icao24='+hex.toLowerCase())
+    fetch('https://blade-fleet-ops.vercel.app/api/proxy?icao24='+hex.toLowerCase())
       .then(r=>r.json()).then(data=>{
         if(!data.states||!data.states.length){resultEl.innerHTML='<span class="re">No live data for '+hex+'</span>';return;}
         const ac=openskyToAc(data.states[0]);
@@ -745,7 +745,7 @@ async function loadData(){
   document.getElementById('last-updated').textContent='Fetching...';
   const hexList=tails.map(t=>t.hex.toLowerCase());
   const params=hexList.join(',');
-  const url='https://opensky-network.org/api/states/all?icao24='+params;
+  const url='https://blade-fleet-ops.vercel.app/api/proxy?icao24='+params;
   try{
     const res=await fetch(url,{signal:AbortSignal.timeout(15000)});
     if(res.status===429||res.status===503){
