@@ -1,28 +1,30 @@
-export default async function handler(req, res) {
-  const { icao24 } = req.query;
-  if (!icao24) return res.status(400).json({ error: 'icao24 required' });
+// CORS proxy for the ADS-B feeds used by index.html.
+// Usage: /api/proxy?u=<encoded upstream URL>
+// Only the hosts below are allowed; everything else is rejected.
+const ALLOWED = [
+  'https://api.adsb.lol/',
+  'https://opendata.adsb.fi/'
+];
 
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
-  res.setHeader('Cache-Control', 's-maxage=15, stale-while-revalidate=30');
+  res.setHeader('Cache-Control', 'no-store');
+
+  const u = req.query.u;
+  if (!u || !ALLOWED.some(p => u.startsWith(p))) {
+    return res.status(400).json({ error: 'u must be an allowed upstream URL' });
+  }
 
   try {
-    const upstream = await fetch(
-      'https://opensky-network.org/api/states/all?icao24=' + icao24,
-      {
-        signal: AbortSignal.timeout(14000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; blade-fleet-ops/1.0)',
-          'Accept': 'application/json'
-        }
-      }
-    );
-    if (!upstream.ok) {
-      return res.status(upstream.status).json({ error: 'upstream ' + upstream.status });
-    }
-    const data = await upstream.json();
-    res.status(200).json(data);
+    const upstream = await fetch(u, {
+      signal: AbortSignal.timeout(14000),
+      headers: { 'Accept': 'application/json', 'User-Agent': 'blade-fleet-ops/1.0' }
+    });
+    const body = await upstream.text();
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(upstream.status).send(body);
   } catch (e) {
-    res.status(502).json({ error: e.message, name: e.name });
+    return res.status(502).json({ error: e.message, name: e.name });
   }
 }
