@@ -332,32 +332,35 @@ function getAcIcon(ac){
 
 // Locations
 const LOCATIONS=[
-  {id:'DCA',name:'Downtown Manhattan HP',lat:40.6892,lon:-74.0445},
-  {id:'E34',name:'East 34th St Heliport',lat:40.7425,lon:-73.9718},
-  {id:'W30',name:'West 30th St Heliport',lat:40.7494,lon:-74.0026},
-  {id:'TEB',name:'Teterboro (TEB)',lat:40.8501,lon:-74.0608},
-  {id:'HPN',name:'Westchester (HPN)',lat:41.0670,lon:-73.7076},
-  {id:'JFK',name:'JFK International',lat:40.6413,lon:-73.7781},
-  {id:'EWR',name:'Newark (EWR)',lat:40.6895,lon:-74.1745},
-  {id:'LGA',name:'LaGuardia (LGA)',lat:40.7769,lon:-73.8740},
-  {id:'BED',name:'Bedford (BED)',lat:42.4700,lon:-71.2893},
-  {id:'FRG',name:'Republic (FRG)',lat:40.7288,lon:-73.4134},
-  {id:'HTO',name:'East Hampton (HTO)',lat:40.9598,lon:-72.2518},
-  {id:'MTP',name:'Montauk (MTP)',lat:41.0765,lon:-71.9208},
-  {id:'SWF',name:'Stewart (SWF)',lat:41.5041,lon:-74.1048},
-  {id:'ACY',name:'Atlantic City (ACY)',lat:39.4576,lon:-74.5772},
-  {id:'PVD',name:'Providence (PVD)',lat:41.7240,lon:-71.4283},
-  {id:'BOS',name:'Boston Logan (BOS)',lat:42.3656,lon:-71.0096},
-  {id:'PHL',name:'Philadelphia (PHL)',lat:39.8729,lon:-75.2437},
-  {id:'IAD',name:'Dulles (IAD)',lat:38.9531,lon:-77.4565},
-  {id:'MIA',name:'Miami (MIA)',lat:25.7959,lon:-80.2870},
-  {id:'PBI',name:'Palm Beach (PBI)',lat:26.6832,lon:-80.0956},
-  {id:'HYA',name:'Hyannis (HYA)',lat:41.6693,lon:-70.2803},
-  {id:'ACK',name:'Nantucket (ACK)',lat:41.2531,lon:-70.0602},
-  {id:'MVY',name:"Martha's Vineyard (MVY)",lat:41.3931,lon:-70.6154},
-  {id:'LWM',name:'Lawrence (LWM)',lat:42.7172,lon:-71.1233},
+  // r = proximity radius in nautical miles. Heliports are tight; airports use the field reference point so stay wider.
+  {id:'JRB',name:'Downtown Manhattan HP',lat:40.7011,lon:-74.0090,r:0.5},
+  {id:'E34',name:'East 34th St Heliport',lat:40.7428,lon:-73.9722,r:0.5},
+  {id:'W30',name:'West 30th St Heliport',lat:40.7544,lon:-74.0072,r:0.5},
+  {id:'TEB',name:'Teterboro (TEB)',lat:40.8501,lon:-74.0608,r:2.0},
+  {id:'HPN',name:'Westchester (HPN)',lat:41.0670,lon:-73.7076,r:2.0},
+  {id:'JFK',name:'JFK International',lat:40.6413,lon:-73.7781,r:2.0},
+  {id:'EWR',name:'Newark (EWR)',lat:40.6895,lon:-74.1745,r:2.0},
+  {id:'LGA',name:'LaGuardia (LGA)',lat:40.7769,lon:-73.8740,r:2.0},
+  {id:'BED',name:'Bedford (BED)',lat:42.4700,lon:-71.2893,r:1.5},
+  {id:'FRG',name:'Republic (FRG)',lat:40.7288,lon:-73.4134,r:1.5},
+  {id:'HTO',name:'East Hampton (HTO)',lat:40.9598,lon:-72.2518,r:1.5},
+  {id:'MTP',name:'Montauk (MTP)',lat:41.0765,lon:-71.9208,r:1.5},
+  {id:'SWF',name:'Stewart (SWF)',lat:41.5041,lon:-74.1048,r:2.0},
+  {id:'ACY',name:'Atlantic City (ACY)',lat:39.4576,lon:-74.5772,r:2.0},
+  {id:'PVD',name:'Providence (PVD)',lat:41.7240,lon:-71.4283,r:2.0},
+  {id:'BOS',name:'Boston Logan (BOS)',lat:42.3656,lon:-71.0096,r:2.0},
+  {id:'PHL',name:'Philadelphia (PHL)',lat:39.8729,lon:-75.2437,r:2.0},
+  {id:'IAD',name:'Dulles (IAD)',lat:38.9531,lon:-77.4565,r:2.0},
+  {id:'MIA',name:'Miami (MIA)',lat:25.7959,lon:-80.2870,r:2.0},
+  {id:'PBI',name:'Palm Beach (PBI)',lat:26.6832,lon:-80.0956,r:2.0},
+  {id:'HYA',name:'Hyannis (HYA)',lat:41.6693,lon:-70.2803,r:1.5},
+  {id:'ACK',name:'Nantucket (ACK)',lat:41.2531,lon:-70.0602,r:1.5},
+  {id:'MVY',name:"Martha's Vineyard (MVY)",lat:41.3931,lon:-70.6154,r:1.5},
+  {id:'LWM',name:'Lawrence (LWM)',lat:42.7172,lon:-71.1233,r:1.5},
 ];
-const PROX_NM=2.0,EVENT_ALT=500;
+const PROX_NM=2.0,EVENT_ALT=500,MAX_NEAR_NM=10;
+// A tail is 'at' a location only when inside that location's own radius.
+function isAt(n){return !!n&&n.dist<=(n.loc.r||PROX_NM);}
 function haversineNm(la1,lo1,la2,lo2){
   const R=3440.065,r=Math.PI/180;
   const a=Math.sin((la2-la1)*r/2)**2+Math.cos(la1*r)*Math.cos(la2*r)*Math.sin((lo2-lo1)*r/2)**2;
@@ -367,6 +370,7 @@ function nearestLoc(lat,lon){
   if(lat==null||lon==null)return null;
   let best=null,bd=Infinity;
   for(const L of LOCATIONS){const d=haversineNm(lat,lon,L.lat,L.lon);if(d<bd){bd=d;best=L;}}
+  if(bd>MAX_NEAR_NM)return null;
   return{loc:best,dist:bd};
 }
 
@@ -681,10 +685,10 @@ let prevStates={},events=[];
 function detectEvents(ac,status,nearest){
   const hex=ac.hex,reg=regOf(hex,ac);
   const prev=prevStates[hex];
-  const isNear=nearest&&nearest.dist<=PROX_NM;
+  const isNear=isAt(nearest);
   const alt=typeof ac.alt_baro==='number'?ac.alt_baro:(ac.alt_baro==='ground'?0:null);
   if(!prev)return;
-  const prevIsNear=prev.nearest&&prev.nearest.dist<=PROX_NM;
+  const prevIsNear=isAt(prev.nearest);
   const isWatched=!!watchlist.find(w=>w.hex===hex);
   if(prev.status==='ground'&&status==='airborne'&&prevIsNear)
     pushEvent('DEPARTED',reg,prev.nearest.loc.name,prev.nearest.dist,ac,isWatched);
@@ -736,7 +740,7 @@ function renderTable(){
     const ac=allData.find(a=>a.hex===t.hex)||{hex:t.hex,seen:null,alt_baro:null,_offline:true};
     const status=getStatus(ac);
     const nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null;
-    const isNear=nearest&&nearest.dist<=PROX_NM;
+    const isNear=isAt(nearest);
     const tailMeta=tails.find(t=>t.hex===ac.hex);
     const isWatched=!!watchlist.find(w=>w.hex===ac.hex);
     return{...ac,r:(ac.r||'').trim()||hexToN(ac.hex)||'',_status:status,_nearest:nearest,_isNear:isNear,_label:tailMeta?tailMeta.label:'',_watched:isWatched};
@@ -795,7 +799,7 @@ function renderTable(){
 }
 function updateStats(){
   const statuses=allData.filter(ac=>tails.find(t=>t.hex===ac.hex)).map(ac=>getStatus(ac));
-  const proxCount=allData.filter(ac=>{if(!ac.lat)return false;const n=nearestLoc(ac.lat,ac.lon);return n&&n.dist<=PROX_NM;}).length;
+  const proxCount=allData.filter(ac=>{if(!ac.lat)return false;const n=nearestLoc(ac.lat,ac.lon);return isAt(n);}).length;
   document.getElementById('stat-total').textContent=tails.length;
   document.getElementById('stat-airborne').textContent=statuses.filter(s=>s==='airborne').length;
   document.getElementById('stat-ground').textContent=statuses.filter(s=>s==='ground').length;
