@@ -294,6 +294,9 @@
 
 <script>
 const PW='heybuddy';
+// ADS-B feeds no longer send CORS headers, so go through our Vercel proxy.
+const PROXY='https://blade-fleet-ops.vercel.app/api/proxy?u=';
+function pfetch(u){return fetch(PROXY+encodeURIComponent(u));}
 function checkPw(){
   if(document.getElementById('pw-input').value===PW){
     sessionStorage.setItem('blade_auth','1');
@@ -496,7 +499,7 @@ async function searchAnyTail(){
     if(false){ liveUrls.push('https://api.adsb.lol/v2/icao/'+hexIn); liveUrls.push('https://opendata.adsb.fi/api/v2/icao/'+hexIn); }
     if(regIn){ liveUrls.push('https://api.adsb.lol/v2/reg/'+regIn); liveUrls.push('https://opendata.adsb.fi/api/v2/registration/'+regIn); }
     for(const url of liveUrls){
-      try{const r=await fetch(url);if(!r.ok)continue;const j=await r.json();if(j.ac&&j.ac.length>0){ac=j.ac[0];break;}}catch(e){continue;}
+      try{const r=await pfetch(url);if(!r.ok)continue;const j=await r.json();if(j.ac&&j.ac.length>0){ac=j.ac[0];break;}}catch(e){continue;}
     }
 
     // 2. If not live, try hexdb.io for static registration data
@@ -809,7 +812,7 @@ async function loadData(){
   const ep2=atob('aHR0cHM6Ly9vcGVuZGF0YS5hZHNiLmZpL2FwaS92Mi9pY2FvLw==')+batch;
   let res=null,lastErr=null;
   for(const url of[ep1,ep2]){
-    try{res=await fetch(url);if(res.ok)break;res=null;}catch(e){lastErr=e;res=null;}
+    try{res=await pfetch(url);if(res.ok)break;res=null;}catch(e){lastErr=e;res=null;}
   }
   try{
     if(!res||!res.ok)throw lastErr||new Error('All endpoints failed');
