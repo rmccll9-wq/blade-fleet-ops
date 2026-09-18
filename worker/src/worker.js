@@ -383,7 +383,7 @@ async function sweep(env){
 // ---- Slack ----
 function fmtTime(ts){return new Date(ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:TZ});}
 function slackLine(e){
-  const arrow=e.type==='DEPARTED'?':small_red_triangle:':':small_red_triangle_down:';
+  const arrow=e.type==='DEPARTED'?':small_red_triangle:':':large_green_circle:'; // red up-triangle = departed, green circle = arrived
   const verb=e.type==='DEPARTED'?'departed':'arrived at';
   const alt=e.alt==null?'':e.alt===0?' · on ground':' · '+e.alt.toLocaleString()+' ft';
   const note=e.inferred?' · _estimated from last tracked position_':'';
