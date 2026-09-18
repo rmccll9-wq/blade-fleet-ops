@@ -167,7 +167,7 @@
       <span class="dash-title">Fleet Ops — Live Tail Tracker</span>
     </div>
     <div class="header-right">
-      <span class="auto-label">Auto: 30s</span>
+      <span class="auto-label">Auto: 15s</span>
       <div class="live-dot"></div>
       <span class="last-updated" id="last-updated">—</span>
       <button class="btn" id="theme-btn" onclick="toggleTheme()">☀ Light</button>
@@ -737,6 +737,33 @@ function pushEvent(type,hex,ac,loc,now,inferred){
   if(events.length>100)events.pop();
 }
 function clearEvents(){events=[];saveState();renderEvents();}
+
+// Last-known backfill. The live feed only lists aircraft transmitting right now, so for silent tails we pull the
+// recent trace (last ~24h) and take its final point. History only; it never generates events.
+const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
+let lastTraceSweep=0;
+async function fetchLastKnown(force){
+  const now=Date.now();
+  if(!force&&now-lastTraceSweep<TRACE_EVERY_MS)return;
+  lastTraceSweep=now;
+  const silent=tails.filter(t=>{const p=prevStates[t.hex];return !p||(p.status!=='airborne'&&p.status!=='ground');});
+  let changed=false;
+  await Promise.all(silent.map(async t=>{
+    try{
+      const r=await pfetch(TRACE_BASE+t.hex.slice(-2)+'/trace_recent_'+t.hex+'.json');
+      if(!r.ok)return;
+      const d=await r.json();const tr=d.trace||[];if(!tr.length)return;
+      const last=tr[tr.length-1],ts=Math.round((d.timestamp+last[0])*1000);
+      const p=prevStates[t.hex];
+      if(p&&p.lastSeen&&p.lastSeen>=ts)return; // what we saw ourselves is newer
+      const lat=last[1],lon=last[2],alt=last[3]==='ground'?0:(typeof last[3]==='number'?last[3]:null);
+      prevStates[t.hex]={status:'nosignal',alt,alt_baro:last[3],lat,lon,nearest:snapNear(nearestLoc(lat,lon)),lastSeen:ts,ts:now,
+        r:d.r||(p&&p.r)||'',t:d.t||(p&&p.t)||'',desc:d.desc||(p&&p.desc)||'',flight:'',fromTrace:true};
+      changed=true;
+    }catch(e){}
+  }));
+  if(changed){saveState();updateStats();renderTable();}
+}
 function fmtEvTime(ev){
   if(!ev.ts)return ev.time||'';
   const d=new Date(ev.ts),n=new Date();
@@ -821,7 +848,7 @@ function renderTable(){
     const dc=s==='airborne'?'sa':s==='ground'?'sg':'ss';
     const sl=s==='airborne'?'Airborne':s==='ground'?'On Ground':'No Signal';
     const n=ac._nearest,isN=ac._isNear,lk=ac._lk;
-    const locName=n?(lk?'<span class="lk">Last: </span>':'')+n.loc.name:'--';
+    const locName=n?(lk?'<span class="lk">Last: </span>':'')+n.loc.name:(lk?'<span class="lk">Last: '+lk.lat.toFixed(3)+', '+lk.lon.toFixed(3)+'</span>':'--');
     const locDist=n?n.dist.toFixed(1)+' nm':'--';
     const badge=isN?(lk?'<span class="lk-badge">LAST</span>':s==='ground'?'<span class="at-badge">AT</span>':'<span class="prox-badge">NEAR</span>'):'';
     const wBadge=ac._watched?'<span class="watch-badge">\u2605</span>':'';
@@ -892,6 +919,7 @@ async function loadData(){
     });
     allData=fresh;
     saveState();
+    fetchLastKnown(false);
     updateStats();renderTable();renderEvents();renderWatchlist();
     document.getElementById('last-updated').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }catch(e){
@@ -900,7 +928,7 @@ async function loadData(){
   }
 }
 
-function init(){renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData();setInterval(loadData,30000);}
+function init(){renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>fetchLastKnown(true));setInterval(loadData,15000);}
 if(sessionStorage.getItem('blade_auth')==='1')init();
 </script>
 </body>
