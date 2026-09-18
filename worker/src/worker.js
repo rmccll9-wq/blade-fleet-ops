@@ -331,6 +331,7 @@ async function sweep(env){
   const events=(await env.KV.get('events','json'))||[];
   const health=(await env.KV.get('health','json'))||{};
   const tails=await getTails(env);
+  for(const k in state){const p=state[k];if(p&&p.lat!=null)p.nearest=snapNear(nearestLoc(p.lat,p.lon));} // re-evaluate stored positions against the current location table
   const fresh=await fetchFeed(tails);
   if(!fresh){await env.KV.put('health',JSON.stringify({...health,lastRun:now,ok:false,error:'feeds unavailable'}));return;}
   const byHex={};for(const a of fresh)byHex[a.hex]=a;
