@@ -11,7 +11,7 @@ const TAILS=[
   {hex:'aa0cf4',label:'N747EE'},{hex:'a07ea1',label:'N1308'},
   {hex:'a7143e',label:'N555ZA'},{hex:'aa416f',label:'N76ZA'},
 ];
-const LOCATIONS=[
+const DEFAULT_LOCATIONS=[ // fallback only; the live list comes from locations.json in the repo (see getLocations)
   {id:'JRB',name:'Downtown Manhattan HP',lat:40.7011,lon:-74.0090,r:0.5},
   {id:'E34',name:'East 34th St Heliport',lat:40.7428,lon:-73.9722,r:0.5},
   {id:'W30',name:'West 30th St Heliport',lat:40.7544,lon:-74.0072,r:0.5},
@@ -38,7 +38,9 @@ const LOCATIONS=[
   {id:'MVY',name:"Martha's Vineyard (MVY)",lat:41.3931,lon:-70.6154,r:1.5},
   {id:'LWM',name:'Lawrence (LWM)',lat:42.7172,lon:-71.1233,r:1.5},
 ];
+let LOCATIONS=DEFAULT_LOCATIONS;
 const EVENT_ALT=500,MAX_NEAR_NM=10;
+const LOCATIONS_URL='https://rmccll9-wq.github.io/blade-fleet-ops/locations.json',LOCATIONS_EVERY_MS=5*60e3;
 const LOST_SEC=90,ARRIVE_MAX_ALT=1500,DEPART_MAX_ALT=2500,EVENT_GAP_SEC=300,LK_MAX_H=48;
 const FEEDS=['https://api.adsb.lol/v2/icao/','https://opendata.adsb.fi/api/v2/icao/'];
 const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
@@ -68,6 +70,7 @@ export default {
         body:JSON.stringify({channel:ch.startsWith('#')?ch:'#'+ch,text:':white_check_mark: blade_fleet_tracker can post here. Mention me with `list`, `add N12345 [label]`, `remove N12345`, or `status`.'})});
       const j=await r.json();return new Response(JSON.stringify({ok:j.ok,error:j.error,channel:j.channel}),{headers:cors});
     }
+    if(url.pathname==='/locations')return new Response(JSON.stringify(await getLocations(env)),{headers:cors});
     if(url.pathname==='/tails')return new Response(JSON.stringify(await getTails(env)),{headers:cors});
     if(url.pathname==='/events')return new Response(JSON.stringify((await env.KV.get('events','json'))||[]),{headers:cors});
     if(url.pathname==='/state')return new Response(JSON.stringify((await env.KV.get('state','json'))||{}),{headers:cors});
@@ -77,7 +80,7 @@ export default {
       return new Response(JSON.stringify(res),{headers:cors});
     }
     if(url.pathname==='/health')return new Response(JSON.stringify((await env.KV.get('health','json'))||{lastRun:null}),{headers:cors});
-    return new Response('BLADE Fleet Ops event worker. Endpoints: /events /state /tails /health',{headers:{'Content-Type':'text/plain'}});
+    return new Response('BLADE Fleet Ops event worker. Endpoints: /events /state /tails /locations /health',{headers:{'Content-Type':'text/plain'}});
   }
 };
 
@@ -152,6 +155,21 @@ function pushEvent(events,out,type,t,ac,loc,now,inferred){
   out.push({type,hex:t.hex,reg:regOf(t.hex,ac,t.label),label:t.label||'',locName:loc.name,locId:loc.id,dist:+loc.dist.toFixed(2),
     callsign:(ac.flight||'').trim(),acType:ac.t||'',alt:typeof ac.alt_baro==='number'?Math.round(ac.alt_baro):(ac.alt_baro==='ground'?0:null),
     ts:now,inferred:!!inferred});
+}
+
+// ---- locations (locations.json on GitHub Pages, cached in KV, refreshed every 5 min) ----
+async function getLocations(env){
+  const now=Date.now(),cached=await env.KV.get('locations','json');
+  if(cached&&cached.list&&cached.list.length&&now-(cached.fetchedAt||0)<LOCATIONS_EVERY_MS){LOCATIONS=cached.list;return LOCATIONS;}
+  try{
+    const r=await fetch(LOCATIONS_URL+'?ts='+now,{signal:AbortSignal.timeout(8000)});
+    if(r.ok){const list=await r.json();
+      const clean=(Array.isArray(list)?list:[]).filter(l=>l&&l.id&&typeof l.lat==='number'&&typeof l.lon==='number').map(l=>({id:l.id,name:l.name||l.id,lat:l.lat,lon:l.lon,r:l.r||2.0}));
+      if(clean.length){LOCATIONS=clean;await env.KV.put('locations',JSON.stringify({list:clean,fetchedAt:now,source:'locations.json'}));return LOCATIONS;}}
+  }catch(e){}
+  if(cached&&cached.list&&cached.list.length){LOCATIONS=cached.list;await env.KV.put('locations',JSON.stringify({...cached,fetchedAt:now}));} // keep the last good copy, retry later
+  else LOCATIONS=DEFAULT_LOCATIONS;
+  return LOCATIONS;
 }
 
 // ---- fleet list (KV, seeded from TAILS) ----
@@ -331,6 +349,7 @@ async function sweep(env){
   const events=(await env.KV.get('events','json'))||[];
   const health=(await env.KV.get('health','json'))||{};
   const tails=await getTails(env);
+  await getLocations(env);
   for(const k in state){const p=state[k];if(p&&p.lat!=null)p.nearest=snapNear(nearestLoc(p.lat,p.lon));} // re-evaluate stored positions against the current location table
   const fresh=await fetchFeed(tails);
   if(!fresh){await env.KV.put('health',JSON.stringify({...health,lastRun:now,ok:false,error:'feeds unavailable'}));return;}

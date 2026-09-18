@@ -343,7 +343,7 @@ function getAcIcon(ac){
 }
 
 // Locations
-const LOCATIONS=[
+let LOCATIONS=[ // fallback copy; the live list is loaded from locations.json (see loadLocations)
   // r = proximity radius in nautical miles. Heliports are tight; airports use the field reference point so stay wider.
   {id:'JRB',name:'Downtown Manhattan HP',lat:40.7011,lon:-74.0090,r:0.5},
   {id:'E34',name:'East 34th St Heliport',lat:40.7428,lon:-73.9722,r:0.5},
@@ -372,6 +372,16 @@ const LOCATIONS=[
   {id:'LWM',name:'Lawrence (LWM)',lat:42.7172,lon:-71.1233,r:1.5},
 ];
 const PROX_NM=2.0,EVENT_ALT=500,MAX_NEAR_NM=10;
+// Locations live in locations.json next to this page so pads and airports can be added without touching code.
+let locationsLoaded=false;
+async function loadLocations(){
+  try{
+    const r=await fetch('locations.json?ts='+Date.now(),{cache:'no-store'});if(!r.ok)return;
+    const list=await r.json();
+    const clean=(Array.isArray(list)?list:[]).filter(l=>l&&l.id&&typeof l.lat==='number'&&typeof l.lon==='number').map(l=>({id:l.id,name:l.name||l.id,lat:l.lat,lon:l.lon,r:l.r||PROX_NM}));
+    if(clean.length){LOCATIONS=clean;locationsLoaded=true;refreshNearest();}
+  }catch(e){}
+}
 // A tail is 'at' a location only when inside that location's own radius.
 function isAt(n){return !!n&&n.dist<=(n.loc.r||PROX_NM);}
 function haversineNm(la1,lo1,la2,lo2){
@@ -974,7 +984,7 @@ async function loadData(){
   }
 }
 
-function init(){refreshNearest();renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
+function init(){loadLocations().then(()=>{refreshNearest();renderTable();updateStats();});setInterval(loadLocations,300000);refreshNearest();renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
 if(sessionStorage.getItem('blade_auth')==='1')init();
 </script>
 </body>

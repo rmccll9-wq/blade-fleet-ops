@@ -1,0 +1,177 @@
+[
+ {
+  "id": "JRB",
+  "name": "Downtown Manhattan HP",
+  "lat": 40.7011,
+  "lon": -74.009,
+  "r": 0.5
+ },
+ {
+  "id": "E34",
+  "name": "East 34th St Heliport",
+  "lat": 40.7428,
+  "lon": -73.9722,
+  "r": 0.5
+ },
+ {
+  "id": "W30",
+  "name": "West 30th St Heliport",
+  "lat": 40.7544,
+  "lon": -74.0072,
+  "r": 0.5
+ },
+ {
+  "id": "65NJ",
+  "name": "Helo Kearny (65NJ)",
+  "lat": 40.7315,
+  "lon": -74.1168,
+  "r": 0.5
+ },
+ {
+  "id": "TEB",
+  "name": "Teterboro (TEB)",
+  "lat": 40.8501,
+  "lon": -74.0608,
+  "r": 2.0
+ },
+ {
+  "id": "HPN",
+  "name": "Westchester (HPN)",
+  "lat": 41.067,
+  "lon": -73.7076,
+  "r": 2.0
+ },
+ {
+  "id": "JFK",
+  "name": "JFK International",
+  "lat": 40.6413,
+  "lon": -73.7781,
+  "r": 2.0
+ },
+ {
+  "id": "EWR",
+  "name": "Newark (EWR)",
+  "lat": 40.6895,
+  "lon": -74.1745,
+  "r": 2.0
+ },
+ {
+  "id": "LGA",
+  "name": "LaGuardia (LGA)",
+  "lat": 40.7769,
+  "lon": -73.874,
+  "r": 2.0
+ },
+ {
+  "id": "BED",
+  "name": "Bedford (BED)",
+  "lat": 42.47,
+  "lon": -71.2893,
+  "r": 1.5
+ },
+ {
+  "id": "FRG",
+  "name": "Republic (FRG)",
+  "lat": 40.7288,
+  "lon": -73.4134,
+  "r": 1.5
+ },
+ {
+  "id": "HTO",
+  "name": "East Hampton (HTO)",
+  "lat": 40.9598,
+  "lon": -72.2518,
+  "r": 1.5
+ },
+ {
+  "id": "MTP",
+  "name": "Montauk (MTP)",
+  "lat": 41.0765,
+  "lon": -71.9208,
+  "r": 1.5
+ },
+ {
+  "id": "SWF",
+  "name": "Stewart (SWF)",
+  "lat": 41.5041,
+  "lon": -74.1048,
+  "r": 2.0
+ },
+ {
+  "id": "ACY",
+  "name": "Atlantic City (ACY)",
+  "lat": 39.4576,
+  "lon": -74.5772,
+  "r": 2.0
+ },
+ {
+  "id": "PVD",
+  "name": "Providence (PVD)",
+  "lat": 41.724,
+  "lon": -71.4283,
+  "r": 2.0
+ },
+ {
+  "id": "BOS",
+  "name": "Boston Logan (BOS)",
+  "lat": 42.3656,
+  "lon": -71.0096,
+  "r": 2.0
+ },
+ {
+  "id": "PHL",
+  "name": "Philadelphia (PHL)",
+  "lat": 39.8729,
+  "lon": -75.2437,
+  "r": 2.0
+ },
+ {
+  "id": "IAD",
+  "name": "Dulles (IAD)",
+  "lat": 38.9531,
+  "lon": -77.4565,
+  "r": 2.0
+ },
+ {
+  "id": "MIA",
+  "name": "Miami (MIA)",
+  "lat": 25.7959,
+  "lon": -80.287,
+  "r": 2.0
+ },
+ {
+  "id": "PBI",
+  "name": "Palm Beach (PBI)",
+  "lat": 26.6832,
+  "lon": -80.0956,
+  "r": 2.0
+ },
+ {
+  "id": "HYA",
+  "name": "Hyannis (HYA)",
+  "lat": 41.6693,
+  "lon": -70.2803,
+  "r": 1.5
+ },
+ {
+  "id": "ACK",
+  "name": "Nantucket (ACK)",
+  "lat": 41.2531,
+  "lon": -70.0602,
+  "r": 1.5
+ },
+ {
+  "id": "MVY",
+  "name": "Martha's Vineyard (MVY)",
+  "lat": 41.3931,
+  "lon": -70.6154,
+  "r": 1.5
+ },
+ {
+  "id": "LWM",
+  "name": "Lawrence (LWM)",
+  "lat": 42.7172,
+  "lon": -71.1233,
+  "r": 1.5
+ }
+]
