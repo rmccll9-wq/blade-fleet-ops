@@ -230,7 +230,7 @@
       <span class="panel-arrow" id="tail-arrow">&#9660; expand</span>
     </div>
     <div class="panel-body" id="tail-panel">
-      <div class="search-row" style="margin-bottom:12px">
+      <div class="search-row" id="tail-controls" style="margin-bottom:12px">
         <div style="display:flex;flex-direction:column;gap:3px">
           <input class="tm-input hex" id="add-hex" placeholder="N-NUMBER or HEX" maxlength="7"
             oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')addTail()">
@@ -250,6 +250,7 @@
           <button class="btn" onclick="toggleBulk()">Cancel</button>
         </div>
       </div>
+      <div class="tm-hint" id="tail-shared-note" style="display:none;margin-bottom:10px;font-size:11px;color:var(--muted)">The fleet list is shared across everyone. Add or remove tails from Slack: <b>@BLADE Fleet Ops add N12345 [label]</b> or <b>remove N12345</b>.</div>
       <div class="tail-grid" id="tail-grid"></div>
       <div class="tm-count" id="tm-count"></div>
     </div>
@@ -607,6 +608,7 @@ async function searchAnyTail(){
   }
 }
 function addFromSearch(){
+  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
   if(!lastSearchResult)return;
   const ac=lastSearchResult,hex=ac.hex.toLowerCase();
   if(tails.find(t=>t.hex===hex)){document.getElementById('add-from-search-btn').textContent='\u2713 In Fleet';return;}
@@ -627,11 +629,15 @@ function watchFromSearch(){
 function renderTailGrid(){
   document.getElementById('tail-grid').innerHTML=tails.map((t,i)=>
     '<div class="tail-chip"><div class="tc-info"><span class="tc-hex">'+(hexToN(t.hex)||t.hex.toUpperCase())+'</span><span class="tc-lbl">'+(t.label||t.hex.toUpperCase())+'</span></div>'+
-    '<button class="tc-remove" onclick="removeTail('+i+')">\u2715</button></div>'
+    (serverMode?'':'<button class="tc-remove" onclick="removeTail('+i+')">\u2715</button>')+'</div>'
   ).join('');
-  document.getElementById('tm-count').textContent=tails.length+' tails tracked';
+  document.getElementById('tm-count').textContent=tails.length+' tails tracked'+(serverMode?' \u00b7 shared list':'');
+  document.getElementById('tail-controls').style.display=serverMode?'none':'';
+  document.getElementById('tail-shared-note').style.display=serverMode?'':'none';
+  if(serverMode)document.getElementById('bulk-area').style.display='none';
 }
 function addTail(){
+  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
   const hex=parseTailInput(document.getElementById('add-hex').value);
   const label=document.getElementById('add-label').value.trim();
   if(!hex){alert('Enter an N-number (e.g. N454FX) or 6-character ICAO hex');return;}
@@ -641,12 +647,14 @@ function addTail(){
   loadData();
 }
 function removeTail(i){
+  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
   const t=tails[i];
   if(!confirm('Remove '+(hexToN(t.hex)||t.hex.toUpperCase())+' from fleet?'))return;
   tails.splice(i,1);saveTails();renderTailGrid();
   allData=allData.filter(ac=>ac.hex!==t.hex);renderTable();updateStats();
 }
 function bulkAdd(){
+  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
   const tokens=document.getElementById('bulk-input').value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   let added=0,skipped=0;
   tokens.forEach(tok=>{
@@ -749,19 +757,26 @@ async function syncServer(force){
   if(!force&&now-lastSync<SYNC_EVERY_MS)return;
   lastSync=now;
   try{
-    const [er,sr]=await Promise.all([fetch(EVENTS_API+'/events',{cache:'no-store'}),fetch(EVENTS_API+'/state',{cache:'no-store'})]);
+    const [er,sr,tr]=await Promise.all([fetch(EVENTS_API+'/events',{cache:'no-store'}),fetch(EVENTS_API+'/state',{cache:'no-store'}),fetch(EVENTS_API+'/tails',{cache:'no-store'})]);
     if(!er.ok)throw new Error('events '+er.status);
     const list=await er.json();
     events=list.filter(e=>e.ts>clearedBefore).map(e=>({type:e.type,hex:e.hex,reg:e.reg,locName:e.locName,dist:(+e.dist).toFixed(2),callsign:e.callsign||'',
       icon:getAcIcon({t:e.acType||''}),alt:e.alt==null?'--':e.alt===0?'Ground':fmt(e.alt)+' ft',ts:e.ts,time:'',inferred:!!e.inferred,
       watched:!!watchlist.find(w=>w.hex===e.hex)}));
     serverMode=true;
+    if(tr.ok){
+      const list=await tr.json();
+      if(Array.isArray(list)&&list.length){
+        const clean=list.filter(t=>t&&/^[0-9a-f]{6}$/.test(t.hex)).map(t=>({hex:t.hex,label:t.label||''}));
+        if(JSON.stringify(clean)!==JSON.stringify(tails)){tails=clean;saveTails();renderTailGrid();}
+      }
+    }
     if(sr.ok){
       const st=await sr.json();
       for(const hex in st){const p=prevStates[hex],q=st[hex];if(!q||q.lat==null)continue;if(!p||!p.lastSeen||(q.lastSeen||0)>p.lastSeen)prevStates[hex]={...q,fromServer:true};}
     }
     saveState();renderEvents();renderTable();updateStats();
-  }catch(e){serverMode=false;}
+  }catch(e){serverMode=false;renderTailGrid();}
 }
 
 // Last-known backfill. The live feed only lists aircraft transmitting right now, so for silent tails we pull the
