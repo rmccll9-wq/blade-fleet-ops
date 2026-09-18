@@ -173,5 +173,103 @@
   "lat": 42.7172,
   "lon": -71.1233,
   "r": 1.5
+ },
+ {
+  "id": "N12",
+  "name": "Lakewood Airport (N12)",
+  "lat": 40.0668,
+  "lon": -74.1777,
+  "r": 1.5
+ },
+ {
+  "id": "6NJ6",
+  "name": "Deal Helipad (6NJ6)",
+  "lat": 40.3001,
+  "lon": -74.0254,
+  "r": 0.5
+ },
+ {
+  "id": "BLM",
+  "name": "Monmouth Executive (BLM)",
+  "lat": 40.1869,
+  "lon": -74.1249,
+  "r": 1.5
+ },
+ {
+  "id": "JY79",
+  "name": "Oceans AC Helipad (JY79)",
+  "lat": 39.3623,
+  "lon": -74.4161,
+  "r": 0.5
+ },
+ {
+  "id": "FOK",
+  "name": "Westhampton Gabreski (FOK)",
+  "lat": 40.8437,
+  "lon": -72.6318,
+  "r": 1.5
+ },
+ {
+  "id": "HWV",
+  "name": "Brookhaven (HWV)",
+  "lat": 40.8219,
+  "lon": -72.8694,
+  "r": 1.5
+ },
+ {
+  "id": "ISP",
+  "name": "Islip MacArthur (ISP)",
+  "lat": 40.7963,
+  "lon": -73.1017,
+  "r": 2.0
+ },
+ {
+  "id": "HVN",
+  "name": "New Haven Tweed (HVN)",
+  "lat": 41.2629,
+  "lon": -72.8877,
+  "r": 2.0
+ },
+ {
+  "id": "BDR",
+  "name": "Bridgeport Sikorsky (BDR)",
+  "lat": 41.1635,
+  "lon": -73.1262,
+  "r": 2.0
+ },
+ {
+  "id": "MMU",
+  "name": "Morristown Municipal (MMU)",
+  "lat": 40.7991,
+  "lon": -74.4149,
+  "r": 2.0
+ },
+ {
+  "id": "MSV",
+  "name": "Sullivan County (MSV)",
+  "lat": 41.7016,
+  "lon": -74.795,
+  "r": 1.5
+ },
+ {
+  "id": "29NY",
+  "name": "NY Boulders Helipad (29NY)",
+  "lat": 41.1708,
+  "lon": -74.0376,
+  "r": 0.5
+ },
+ {
+  "id": "W00",
+  "name": "Freeway Airport (W00)",
+  "lat": 38.9414,
+  "lon": -76.7724,
+  "r": 1.5
+ },
+ {
+  "id": "39N",
+  "name": "Princeton (39N)",
+  "lat": 40.3992,
+  "lon": -74.6589,
+  "r": 1.5
  }
 ]
