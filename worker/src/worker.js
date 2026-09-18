@@ -45,7 +45,7 @@ const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
 // (same one the dashboard uses). It only forwards to the allow-listed feed hosts.
 const PROXY='https://blade-fleet-ops.vercel.app/api/proxy?u=';
 function upstream(u,ms){return fetch(PROXY+encodeURIComponent(u),{headers:{'Accept':'application/json'},signal:AbortSignal.timeout(ms||10000)});}
-const MAX_EVENTS=300,SAMPLE_GAP_MS=30000;
+const MAX_EVENTS=150,SAMPLE_GAP_MS=30000; // keep the stored log modest: the free plan allows 10 ms CPU per run
 const TZ='America/New_York';
 
 export default {
@@ -55,6 +55,18 @@ export default {
     const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET','Cache-Control':'no-store','Content-Type':'application/json'};
     if(req.method==='OPTIONS')return new Response(null,{headers:cors});
     if(url.pathname==='/slack/events'&&req.method==='POST')return handleSlack(req,env,ctx);
+    if(url.pathname==='/slack/whoami'){ // diagnostics: which bot identity the token belongs to (no secrets returned)
+      if(!env.SLACK_BOT_TOKEN)return new Response(JSON.stringify({error:'SLACK_BOT_TOKEN not set'}),{headers:cors});
+      const r=await fetch('https://slack.com/api/auth.test',{method:'POST',headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+      const j=await r.json();
+      return new Response(JSON.stringify({ok:j.ok,error:j.error,bot_user:j.user,bot_user_id:j.user_id,team:j.team,signing_secret_set:!!env.SLACK_SIGNING_SECRET}),{headers:cors});
+    }
+    if(url.pathname==='/slack/selftest'){ // diagnostics: try posting to a channel by name; the Slack error says if the bot is not a member
+      const ch=url.searchParams.get('channel');if(!ch)return new Response(JSON.stringify({error:'pass ?channel=name'}),{headers:cors});
+      const r=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
+        body:JSON.stringify({channel:ch.startsWith('#')?ch:'#'+ch,text:':white_check_mark: blade_fleet_tracker can post here. Mention me with `list`, `add N12345 [label]`, `remove N12345`, or `status`.'})});
+      const j=await r.json();return new Response(JSON.stringify({ok:j.ok,error:j.error,channel:j.channel}),{headers:cors});
+    }
     if(url.pathname==='/tails')return new Response(JSON.stringify(await getTails(env)),{headers:cors});
     if(url.pathname==='/events')return new Response(JSON.stringify((await env.KV.get('events','json'))||[]),{headers:cors});
     if(url.pathname==='/state')return new Response(JSON.stringify((await env.KV.get('state','json'))||{}),{headers:cors});
@@ -167,8 +179,9 @@ async function handleSlack(req,env,ctx){
   let payload;try{payload=JSON.parse(body);}catch(e){return new Response('bad json',{status:400});}
   if(payload.type==='url_verification')return new Response(JSON.stringify({challenge:payload.challenge}),{headers:{'Content-Type':'application/json'}});
   if(req.headers.get('x-slack-retry-num'))return new Response('ok'); // retry of an event already handled
-  if(payload.type==='event_callback'&&payload.event&&payload.event.type==='app_mention'&&!payload.event.bot_id)
-    ctx.waitUntil(handleMention(env,payload.event));
+  const ev=payload.type==='event_callback'?payload.event:null;
+  if(ev&&(ev.type==='app_mention'||ev.type==='message')&&!ev.bot_id&&!ev.subtype&&ev.text)
+    ctx.waitUntil(handleMessage(env,ev,ev.type==='app_mention'));
   return new Response('ok');
 }
 async function verifySlack(secret,ts,body,sig){
@@ -181,44 +194,105 @@ async function verifySlack(secret,ts,body,sig){
   let diff=0;for(let i=0;i<expected.length;i++)diff|=expected.charCodeAt(i)^sig.charCodeAt(i);
   return diff===0;
 }
-async function handleMention(env,ev){
-  const text=(ev.text||'').replace(/<@[^>]+>/g,' ').replace(/[\u2018\u2019]/g,"'").replace(/\s+/g,' ').trim();
+// Messages can arrive twice (Events API + channel polling), so every processed message ts is remembered.
+async function alreadySeen(env,ts){
+  const seen=(await env.KV.get('slack_seen','json'))||[];
+  if(seen.includes(ts))return true;
+  seen.push(ts);while(seen.length>200)seen.shift();
+  await env.KV.put('slack_seen',JSON.stringify(seen));
+  return false;
+}
+async function handleMessage(env,ev,mentioned){
+  if(!ev.ts||await alreadySeen(env,ev.ts))return;
+  const parsed=parseCommand(ev.text,mentioned);
+  if(!parsed)return; // ordinary chatter in the channel: stay quiet
   let reply;
-  try{reply=await runCommand(env,text);}catch(e){reply='Something went wrong: '+e.message;}
+  try{reply=await runCommand(env,parsed);}catch(e){reply='Something went wrong: '+e.message;}
   await slackPost(env,ev.channel,reply,ev.thread_ts||ev.ts);
 }
-function tailName(t){return hexToN(t.hex)||t.hex.toUpperCase();}
-async function runCommand(env,text){
-  const parts=text.split(' ').filter(Boolean),c=(parts[0]||'').toLowerCase(),rest=parts.slice(1);
-  const tails=await getTails(env);
-  if(c==='add'||c==='track'){
-    if(!rest.length)return 'Usage: `add N12345 [label]`';
-    const hex=await resolveHex(rest[0]),label=rest.slice(1).join(' ');
-    if(!hex)return `Couldn't resolve *${rest[0]}* to an aircraft. Use a US N-number (e.g. N84BL) or a 6-character ICAO hex.`;
-    const existing=tails.find(t=>t.hex===hex);
-    if(existing){if(label&&label!==existing.label){existing.label=label;await env.KV.put('tails',JSON.stringify(tails));return `*${tailName(existing)}* was already tracked; label updated to "${label}".`;}return `*${tailName(existing)}* is already tracked.`;}
-    tails.push({hex,label});await env.KV.put('tails',JSON.stringify(tails));
-    return `:white_check_mark: Added *${hexToN(hex)||hex.toUpperCase()}*${label?' ('+label+')':''} · hex ${hex.toUpperCase()}. Now tracking ${tails.length} tails. It appears on the dashboard within a minute.`;
+// Plain-language parsing: "add N84BL Robby's 407", "please remove N84BL", "where is N92N", "list", "status".
+const KEYWORDS=[[/\b(add|track|start tracking|watch|include)\b/i,'add'],[/\b(remove|delete|untrack|stop tracking|drop|exclude)\b/i,'remove'],
+  [/\b(list|fleet|tails|tracking)\b/i,'list'],[/\b(status|health|alive|working)\b/i,'status'],[/\b(help|commands)\b/i,'help']];
+function findTail(text){
+  const m=/\b(N[1-9][0-9]{0,4}[A-Z]{0,2})\b/i.exec(text)||/\b([0-9A-F]{6})\b/i.exec(text);
+  return m?{token:m[1].toUpperCase(),index:m.index,length:m[1].length}:null;
+}
+function parseCommand(rawText,mentioned){
+  const text=(rawText||'').replace(/<@[^>]+>/g,' ').replace(/[‘’]/g,"'").replace(/\s+/g,' ').trim();
+  const tail=findTail(text);
+  let cmd=null;for(const [re,name] of KEYWORDS){if(re.test(text)){cmd=name;break;}}
+  if(cmd==='list'&&tail)cmd=null; // "who is N84BL" -> a lookup, not the fleet list
+  if(!cmd&&tail)cmd='lookup';
+  if(!cmd)return mentioned?{cmd:'help',text}:null;
+  // Without a direct mention, a bare list/status/help only counts when the message is short and clearly aimed at the bot.
+  if(!mentioned&&!tail&&(cmd==='list'||cmd==='status'||cmd==='help')&&text.split(' ').length>4)return null;
+  if((cmd==='add'||cmd==='remove'||cmd==='lookup')&&!tail)return mentioned?{cmd:'help',text}:null;
+  let label='';
+  if(cmd==='add'&&tail){
+    label=text.slice(tail.index+tail.length).replace(/^[\s,.:;-]+/,'')
+      .replace(/^(to|into|on|in)\s+(the\s+|our\s+)?(tracker|fleet|list|dashboard)\b[\s,.:;-]*/i,'')
+      .replace(/^(as|called|named?|label(l?ed)?|with label|it'?s)\s+/i,'')
+      .replace(/\b(please|thanks|thank you|pls)\b/gi,'').replace(/[\s,.!?"]+$/,'').replace(/^["']|["']$/g,'').trim();
   }
-  if(c==='remove'||c==='delete'||c==='untrack'){
-    if(!rest.length)return 'Usage: `remove N12345`';
-    const hex=await resolveHex(rest[0]),i=hex?tails.findIndex(t=>t.hex===hex):-1;
-    if(i<0)return `*${rest[0]}* isn't on the list.`;
+  return{cmd,tail:tail?tail.token:null,label,text};
+}
+function tailName(t){return hexToN(t.hex)||t.hex.toUpperCase();}
+function describeTail(t,s){
+  const st=!s?'no data yet':s.status==='airborne'?'airborne'+(s.alt!=null?' at '+Math.round(s.alt).toLocaleString()+' ft':''):s.status==='ground'?'on the ground':'not transmitting · last tracked '+fmtTime(s.lastSeen);
+  const loc=s&&s.nearest?` · ${s.nearest.name} ${s.nearest.dist.toFixed(1)} nm`:(s&&s.lat!=null?` · ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}`:'');
+  return `*${tailName(t)}*${t.label?' ('+t.label+')':''} — ${st}${loc}`;
+}
+async function runCommand(env,p){
+  const tails=await getTails(env);
+  if(p.cmd==='add'){
+    const hex=await resolveHex(p.tail);
+    if(!hex)return `I couldn't match *${p.tail}* to an aircraft. Use a US N-number like N84BL or a 6-character ICAO hex.`;
+    const existing=tails.find(t=>t.hex===hex);
+    if(existing){if(p.label&&p.label!==existing.label){existing.label=p.label;await env.KV.put('tails',JSON.stringify(tails));return `*${tailName(existing)}* was already on the tracker. Label updated to "${p.label}".`;}return `*${tailName(existing)}* is already on the tracker.`;}
+    tails.push({hex,label:p.label});await env.KV.put('tails',JSON.stringify(tails));
+    return `:white_check_mark: Added *${hexToN(hex)||hex.toUpperCase()}*${p.label?' ('+p.label+')':''} (hex ${hex.toUpperCase()}). Now tracking ${tails.length} tails. It shows on the dashboard within a minute.`;
+  }
+  if(p.cmd==='remove'){
+    const hex=await resolveHex(p.tail),i=hex?tails.findIndex(t=>t.hex===hex):-1;
+    if(i<0)return `*${p.tail}* isn't on the tracker.`;
     const [t]=tails.splice(i,1);await env.KV.put('tails',JSON.stringify(tails));
     return `:wastebasket: Removed *${tailName(t)}*. Now tracking ${tails.length} tails.`;
   }
-  if(c==='list'||c==='tails'||c==='fleet'){
+  if(p.cmd==='lookup'){
+    const hex=await resolveHex(p.tail),t=hex?tails.find(x=>x.hex===hex):null;
+    if(!t)return `*${p.tail}* isn't on the tracker. Say "add ${p.tail}" to start tracking it.`;
     const state=(await env.KV.get('state','json'))||{};
-    return `*Tracking ${tails.length} tails*\n`+tails.map(t=>{const s=state[t.hex];
-      const st=!s?'no data yet':s.status==='airborne'?'airborne'+(s.alt!=null?' '+Math.round(s.alt).toLocaleString()+' ft':''):s.status==='ground'?'on ground':'no signal · last seen '+fmtTime(s.lastSeen);
-      const loc=s&&s.nearest?` · ${s.nearest.name} ${s.nearest.dist.toFixed(1)} nm`:'';
-      return `• *${tailName(t)}*${t.label?' ('+t.label+')':''} — ${st}${loc}`;}).join('\n');
+    return describeTail(t,state[t.hex]);
   }
-  if(c==='status'||c==='health'){
+  if(p.cmd==='list'){
+    const state=(await env.KV.get('state','json'))||{};
+    return `*Tracking ${tails.length} tails*\n`+tails.map(t=>'• '+describeTail(t,state[t.hex])).join('\n');
+  }
+  if(p.cmd==='status'){
     const h=(await env.KV.get('health','json'))||{};
-    return `Last sweep ${h.lastRun?fmtTime(h.lastRun):'never'} · ${h.ok?'feeds ok':'feeds unavailable'} · ${h.live??0} tails live · ${h.events??0} events logged · Slack ${h.slackOk===false?'post failed':'ok'}`;
+    return `Last sweep ${h.lastRun?fmtTime(h.lastRun):'never'} · ${h.ok?'feeds ok':'feeds unavailable'} · ${h.live??0} tails live · ${h.events??0} events logged · Slack posting ${h.slackOk===false?'failed':'ok'}`;
   }
-  return 'I track the BLADE fleet. Commands:\n• `add N12345 [label]` — start tracking a tail\n• `remove N12345` — stop tracking\n• `list` — every tail and where it is\n• `status` — worker health';
+  return 'I track the BLADE fleet and post departures and arrivals here. Just tell me in plain words:\n• "add N84BL Robby\'s 407" — start tracking a tail (label optional)\n• "remove N84BL" — stop tracking\n• "where is N84BL" — one tail\'s status\n• "list" — every tail\n• "status" — tracker health';
+}
+// Channel polling: independent of Slack's event delivery. Reads new messages in the tracker channel each sweep.
+async function pollSlackChannel(env){
+  if(!env.SLACK_BOT_TOKEN||!env.SLACK_CHANNEL_ID)return;
+  const cursor=await env.KV.get('slack_cursor');
+  const params=new URLSearchParams({channel:env.SLACK_CHANNEL_ID,limit:'20'});
+  if(cursor)params.set('oldest',cursor);
+  const r=await fetch('https://slack.com/api/conversations.history?'+params,{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+  const j=await r.json();
+  if(!j.ok){await env.KV.put('slack_poll_error',j.error||'unknown');return;}
+  await env.KV.delete('slack_poll_error');
+  const msgs=(j.messages||[]).filter(m=>m.type==='message'&&!m.bot_id&&!m.subtype&&m.text&&m.ts!==cursor).sort((a,b)=>+a.ts-+b.ts);
+  if(!cursor){ // first run: only mark the position, never replay old history
+    const latest=(j.messages||[]).reduce((mx,m)=>+m.ts>+mx?m.ts:mx,'0');
+    await env.KV.put('slack_cursor',latest===  '0'?String(Date.now()/1000):latest);return;
+  }
+  let last=cursor;
+  for(const m of msgs){await handleMessage(env,{...m,channel:env.SLACK_CHANNEL_ID},false);if(+m.ts>+last)last=m.ts;}
+  const newest=(j.messages||[]).reduce((mx,m)=>+m.ts>+mx?m.ts:mx,last);
+  if(newest!==cursor)await env.KV.put('slack_cursor',newest);
 }
 async function slackPost(env,channel,text,thread_ts){
   if(!env.SLACK_BOT_TOKEN)return;
@@ -281,7 +355,8 @@ async function sweep(env){
   }
   await env.KV.put('state',JSON.stringify(state));
   await env.KV.put('events',JSON.stringify(events));
-  await env.KV.put('health',JSON.stringify({lastRun:now,ok:true,live:fresh.length,lastTrace,slackOk,events:events.length}));
+  await env.KV.put('health',JSON.stringify({lastRun:now,ok:true,live:fresh.length,lastTrace,slackOk,events:events.length,slackPollError:(await env.KV.get('slack_poll_error'))||null}));
+  try{await pollSlackChannel(env);}catch(e){await env.KV.put('slack_poll_error',String(e.message||e));}
 }
 
 // ---- Slack ----
@@ -303,4 +378,4 @@ async function postSlack(env,newEvents){
   }catch(e){return false;}
 }
 
-export {verifySlack,nToHex,hexToN,resolveHex};
+export {verifySlack,nToHex,hexToN,resolveHex,parseCommand};

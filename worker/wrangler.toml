@@ -4,6 +4,9 @@ main = "src/worker.js"
 compatibility_date = "2026-09-01"
 account_id = "d1be322958802f1805183230bd6e0c28"
 
+[vars]
+SLACK_CHANNEL_ID = "C0C2YS9G7PB"   # #blade-fleet-tracker: the bot reads this channel for plain-text commands
+
 [triggers]
 crons = ["* * * * *"]   # every minute; each run samples twice (0s and 30s)
 
