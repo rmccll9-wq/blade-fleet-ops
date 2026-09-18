@@ -2,6 +2,7 @@
 // Runs on Cloudflare Workers. Every minute it samples the ADS-B feeds twice, detects departures and arrivals at
 // BLADE locations, posts them to Slack, and serves the shared event log + last-known positions to the dashboard.
 // Detection logic mirrors index.html so both agree on what counts as an event.
+// The fleet list lives in KV (seeded from TAILS below) and is managed by @-mentioning the bot in Slack.
 
 const TAILS=[
   {hex:'acbcfd',label:''},{hex:'a81624',label:''},{hex:'ac1dbc',label:''},
@@ -49,19 +50,21 @@ const TZ='America/New_York';
 
 export default {
   async scheduled(event,env,ctx){ctx.waitUntil(runSweeps(env));},
-  async fetch(req,env){
+  async fetch(req,env,ctx){
     const url=new URL(req.url);
     const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET','Cache-Control':'no-store','Content-Type':'application/json'};
     if(req.method==='OPTIONS')return new Response(null,{headers:cors});
+    if(url.pathname==='/slack/events'&&req.method==='POST')return handleSlack(req,env,ctx);
+    if(url.pathname==='/tails')return new Response(JSON.stringify(await getTails(env)),{headers:cors});
     if(url.pathname==='/events')return new Response(JSON.stringify((await env.KV.get('events','json'))||[]),{headers:cors});
     if(url.pathname==='/state')return new Response(JSON.stringify((await env.KV.get('state','json'))||{}),{headers:cors});
     if(url.pathname==='/debug'){
-      const batch=TAILS.map(t=>t.hex).join(',').toUpperCase(),res={};
+      const batch=(await getTails(env)).map(t=>t.hex).join(',').toUpperCase(),res={};
       for(const base of FEEDS){try{const r=await upstream(base+batch,12000);res[base]={status:r.status,body:(await r.text()).slice(0,160)};}catch(e){res[base]={error:String(e)};}}
       return new Response(JSON.stringify(res),{headers:cors});
     }
     if(url.pathname==='/health')return new Response(JSON.stringify((await env.KV.get('health','json'))||{lastRun:null}),{headers:cors});
-    return new Response('BLADE Fleet Ops event worker. Endpoints: /events /state /health',{headers:{'Content-Type':'text/plain'}});
+    return new Response('BLADE Fleet Ops event worker. Endpoints: /events /state /tails /health',{headers:{'Content-Type':'text/plain'}});
   }
 };
 
@@ -79,17 +82,32 @@ function nearForEvent(s){return !!s&&s.dist<=s.r+(s.r<1?0.5:1.0);}
 function getStatus(ac){if(!ac.lat||ac.seen>120)return'stale';if(ac.alt_baro==='ground')return'ground';if(typeof ac.alt_baro==='number'&&ac.alt_baro>0)return'airborne';if(ac.gs>30)return'airborne';return'ground';}
 function altOf(ac){return typeof ac.alt_baro==='number'?ac.alt_baro:(ac.alt_baro==='ground'?0:null);}
 function lkFresh(p,now){return !!p&&!!p.lastSeen&&(now-p.lastSeen)<LK_MAX_H*3600e3;}
-function hexToN(hex){ // US N-number from ICAO hex (a00001..adf7c7)
-  const n=parseInt(hex,16);if(isNaN(n)||n<0xA00001||n>0xADF7C7)return null;
-  const L='ABCDEFGHJKLMNPQRSTUVWXYZ';let v=n-0xA00001,s='N';
-  const d1=Math.floor(v/101711)+1;v%=101711;s+=d1;if(v===0)return s;v--;
-  if(v<24)return s+L[v];v-=24;
-  const d2=Math.floor(v/10111);v%=10111;s+=d2;if(v===0)return s;v--;
-  if(v<24)return s+L[v];v-=24;
-  const d3=Math.floor(v/951);v%=951;s+=d3;if(v===0)return s;v--;
-  if(v<24)return s+L[v];v-=24;
-  const d4=Math.floor(v/35);v%=35;s+=d4;if(v===0)return s;v--;
-  if(v<24)return s+L[v];v-=24;return s+(v);
+function _nL(rem){if(rem==0)return"";--rem;return _LA[rem];}
+function _nLL(rem){if(rem==0)return"";--rem;return _LA[Math.floor(rem/25)]+_nL(rem%25);}
+function hexToN(hex){
+  let off=parseInt(hex,16)-0xA00001; if(isNaN(off)||off<0||off>=915399)return null;
+  let reg="N"+(Math.floor(off/101711)+1); off%=101711;
+  if(off<=600)return reg+_nLL(off); off-=601;
+  reg+=Math.floor(off/10111); off%=10111;
+  if(off<=600)return reg+_nLL(off); off-=601;
+  reg+=Math.floor(off/951); off%=951;
+  if(off<=600)return reg+_nLL(off); off-=601;
+  reg+=Math.floor(off/35); off%=35;
+  if(off<=24)return reg+_nL(off); off-=25;
+  return reg+off;
+}
+const _LA="ABCDEFGHJKLMNPQRSTUVWXYZ";
+function _lv(L){if(!L)return 0;const a=_LA.indexOf(L[0]);if(a<0)return -1;if(L.length===1)return a*25+1;const b=_LA.indexOf(L[1]);return b<0?-1:a*25+b+2;}
+function nToHex(n){ // US N-number -> ICAO hex (inverse of hexToN)
+  const m=/^N([1-9])(\d?)(\d?)(\d?)(\d?)([A-Z]{0,2})$/.exec((n||'').toUpperCase().replace(/[^A-Z0-9]/g,''));if(!m)return null;
+  const d=[m[1],m[2],m[3],m[4],m[5]],L=m[6];if((d[4]&&L)||/[IO]/.test(L))return null;
+  const hx=o=>(0xA00001+o).toString(16);
+  let off=(+d[0]-1)*101711,v;
+  if(!d[1]){v=_lv(L);return v<0?null:hx(off+v);}off+=601+(+d[1])*10111;
+  if(!d[2]){v=_lv(L);return v<0?null:hx(off+v);}off+=601+(+d[2])*951;
+  if(!d[3]){v=_lv(L);return v<0?null:hx(off+v);}off+=601+(+d[3])*35;
+  if(!d[4]){if(L.length>1)return null;v=L?_LA.indexOf(L)+1:0;return(L&&v<1)?null:hx(off+v);}
+  return hx(off+25+(+d[4]));
 }
 function regOf(hex,ac,label){return (ac&&ac.r&&ac.r.trim())||hexToN(hex)||label||hex.toUpperCase();}
 
@@ -123,17 +141,102 @@ function pushEvent(events,out,type,t,ac,loc,now,inferred){
     ts:now,inferred:!!inferred});
 }
 
+// ---- fleet list (KV, seeded from TAILS) ----
+async function getTails(env){
+  const t=await env.KV.get('tails','json');
+  if(Array.isArray(t)&&t.length)return t;
+  await env.KV.put('tails',JSON.stringify(TAILS));
+  return TAILS.slice();
+}
+async function resolveHex(id){
+  const s=(id||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!s)return null;
+  if(s[0]==='N'){const h=nToHex(s);if(h)return h;}
+  else if(/^[0-9A-F]{6}$/.test(s))return s.toLowerCase();
+  // non-US registration or unusual format: ask the feed
+  try{const r=await upstream('https://api.adsb.lol/v2/reg/'+s,8000);if(r.ok){const j=await r.json();if(j.ac&&j.ac[0]&&j.ac[0].hex)return j.ac[0].hex.toLowerCase();}}catch(e){}
+  return null;
+}
+
+// ---- Slack bot: @mention commands ----
+async function handleSlack(req,env,ctx){
+  const body=await req.text();
+  if(!env.SLACK_SIGNING_SECRET)return new Response('signing secret not configured',{status:503});
+  const ok=await verifySlack(env.SLACK_SIGNING_SECRET,req.headers.get('x-slack-request-timestamp'),body,req.headers.get('x-slack-signature'));
+  if(!ok)return new Response('bad signature',{status:401});
+  let payload;try{payload=JSON.parse(body);}catch(e){return new Response('bad json',{status:400});}
+  if(payload.type==='url_verification')return new Response(JSON.stringify({challenge:payload.challenge}),{headers:{'Content-Type':'application/json'}});
+  if(req.headers.get('x-slack-retry-num'))return new Response('ok'); // retry of an event already handled
+  if(payload.type==='event_callback'&&payload.event&&payload.event.type==='app_mention'&&!payload.event.bot_id)
+    ctx.waitUntil(handleMention(env,payload.event));
+  return new Response('ok');
+}
+async function verifySlack(secret,ts,body,sig){
+  if(!ts||!sig||!/^\d+$/.test(ts))return false;
+  if(Math.abs(Date.now()/1000-Number(ts))>300)return false; // replay window
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+  const mac=await crypto.subtle.sign('HMAC',key,new TextEncoder().encode('v0:'+ts+':'+body));
+  const expected='v0='+[...new Uint8Array(mac)].map(b=>b.toString(16).padStart(2,'0')).join('');
+  if(expected.length!==sig.length)return false;
+  let diff=0;for(let i=0;i<expected.length;i++)diff|=expected.charCodeAt(i)^sig.charCodeAt(i);
+  return diff===0;
+}
+async function handleMention(env,ev){
+  const text=(ev.text||'').replace(/<@[^>]+>/g,' ').replace(/[\u2018\u2019]/g,"'").replace(/\s+/g,' ').trim();
+  let reply;
+  try{reply=await runCommand(env,text);}catch(e){reply='Something went wrong: '+e.message;}
+  await slackPost(env,ev.channel,reply,ev.thread_ts||ev.ts);
+}
+function tailName(t){return hexToN(t.hex)||t.hex.toUpperCase();}
+async function runCommand(env,text){
+  const parts=text.split(' ').filter(Boolean),c=(parts[0]||'').toLowerCase(),rest=parts.slice(1);
+  const tails=await getTails(env);
+  if(c==='add'||c==='track'){
+    if(!rest.length)return 'Usage: `add N12345 [label]`';
+    const hex=await resolveHex(rest[0]),label=rest.slice(1).join(' ');
+    if(!hex)return `Couldn't resolve *${rest[0]}* to an aircraft. Use a US N-number (e.g. N84BL) or a 6-character ICAO hex.`;
+    const existing=tails.find(t=>t.hex===hex);
+    if(existing){if(label&&label!==existing.label){existing.label=label;await env.KV.put('tails',JSON.stringify(tails));return `*${tailName(existing)}* was already tracked; label updated to "${label}".`;}return `*${tailName(existing)}* is already tracked.`;}
+    tails.push({hex,label});await env.KV.put('tails',JSON.stringify(tails));
+    return `:white_check_mark: Added *${hexToN(hex)||hex.toUpperCase()}*${label?' ('+label+')':''} · hex ${hex.toUpperCase()}. Now tracking ${tails.length} tails. It appears on the dashboard within a minute.`;
+  }
+  if(c==='remove'||c==='delete'||c==='untrack'){
+    if(!rest.length)return 'Usage: `remove N12345`';
+    const hex=await resolveHex(rest[0]),i=hex?tails.findIndex(t=>t.hex===hex):-1;
+    if(i<0)return `*${rest[0]}* isn't on the list.`;
+    const [t]=tails.splice(i,1);await env.KV.put('tails',JSON.stringify(tails));
+    return `:wastebasket: Removed *${tailName(t)}*. Now tracking ${tails.length} tails.`;
+  }
+  if(c==='list'||c==='tails'||c==='fleet'){
+    const state=(await env.KV.get('state','json'))||{};
+    return `*Tracking ${tails.length} tails*\n`+tails.map(t=>{const s=state[t.hex];
+      const st=!s?'no data yet':s.status==='airborne'?'airborne'+(s.alt!=null?' '+Math.round(s.alt).toLocaleString()+' ft':''):s.status==='ground'?'on ground':'no signal · last seen '+fmtTime(s.lastSeen);
+      const loc=s&&s.nearest?` · ${s.nearest.name} ${s.nearest.dist.toFixed(1)} nm`:'';
+      return `• *${tailName(t)}*${t.label?' ('+t.label+')':''} — ${st}${loc}`;}).join('\n');
+  }
+  if(c==='status'||c==='health'){
+    const h=(await env.KV.get('health','json'))||{};
+    return `Last sweep ${h.lastRun?fmtTime(h.lastRun):'never'} · ${h.ok?'feeds ok':'feeds unavailable'} · ${h.live??0} tails live · ${h.events??0} events logged · Slack ${h.slackOk===false?'post failed':'ok'}`;
+  }
+  return 'I track the BLADE fleet. Commands:\n• `add N12345 [label]` — start tracking a tail\n• `remove N12345` — stop tracking\n• `list` — every tail and where it is\n• `status` — worker health';
+}
+async function slackPost(env,channel,text,thread_ts){
+  if(!env.SLACK_BOT_TOKEN)return;
+  await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
+    body:JSON.stringify({channel,text,thread_ts,unfurl_links:false})});
+}
+
 // ---- data ----
-async function fetchFeed(){
-  const batch=TAILS.map(t=>t.hex).join(',').toUpperCase();
+async function fetchFeed(tails){
+  const batch=tails.map(t=>t.hex).join(',').toUpperCase();
   for(const base of FEEDS){
     try{const r=await upstream(base+batch,12000);
       if(!r.ok)continue;const j=await r.json();if(j&&Array.isArray(j.ac))return j.ac;}catch(e){}
   }
   return null;
 }
-async function backfillTraces(state,now){
-  const silent=TAILS.filter(t=>{const p=state[t.hex];return !p||(p.status!=='airborne'&&p.status!=='ground');});
+async function backfillTraces(state,now,tails){
+  const silent=tails.filter(t=>{const p=state[t.hex];return !p||(p.status!=='airborne'&&p.status!=='ground');});
   await Promise.all(silent.map(async t=>{
     try{
       const r=await upstream(TRACE_BASE+t.hex.slice(-2)+'/trace_recent_'+t.hex+'.json',12000);
@@ -152,11 +255,12 @@ async function sweep(env){
   const state=(await env.KV.get('state','json'))||{};
   const events=(await env.KV.get('events','json'))||[];
   const health=(await env.KV.get('health','json'))||{};
-  const fresh=await fetchFeed();
+  const tails=await getTails(env);
+  const fresh=await fetchFeed(tails);
   if(!fresh){await env.KV.put('health',JSON.stringify({...health,lastRun:now,ok:false,error:'feeds unavailable'}));return;}
   const byHex={};for(const a of fresh)byHex[a.hex]=a;
   const out=[];
-  for(const t of TAILS){
+  for(const t of tails){
     const ac=byHex[t.hex],prev=state[t.hex];
     const status=ac?getStatus(ac):'stale';
     if(ac&&status!=='stale'){
@@ -168,7 +272,7 @@ async function sweep(env){
     }else handleLost(t,prev,now,events,out);
   }
   let lastTrace=health.lastTrace||0;
-  if(now-lastTrace>TRACE_EVERY_MS){await backfillTraces(state,now);lastTrace=now;}
+  if(now-lastTrace>TRACE_EVERY_MS){await backfillTraces(state,now,tails);lastTrace=now;}
   let slackOk=health.slackOk;
   if(out.length){
     events.unshift(...out.slice().reverse());
@@ -198,3 +302,5 @@ async function postSlack(env,newEvents){
     return r.ok;
   }catch(e){return false;}
 }
+
+export {verifySlack,nToHex,hexToN,resolveHex};
