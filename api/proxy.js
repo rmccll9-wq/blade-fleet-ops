@@ -3,7 +3,8 @@
 // Only the hosts below are allowed; everything else is rejected.
 const ALLOWED = [
   'https://api.adsb.lol/',
-  'https://opendata.adsb.fi/'
+  'https://opendata.adsb.fi/',
+  'https://adsb.lol/data/traces/'   // recent trace per aircraft: last-known position for tails not currently transmitting
 ];
 
 export default async function handler(req, res) {
