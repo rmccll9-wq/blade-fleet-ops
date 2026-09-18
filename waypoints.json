@@ -1,0 +1,596 @@
+[
+ {
+  "name": "Hudson River – Statue of Liberty",
+  "lat": 40.689,
+  "lon": -74.044,
+  "r": 0.9
+ },
+ {
+  "name": "Hudson River – Lower Manhattan",
+  "lat": 40.716,
+  "lon": -74.02,
+  "r": 0.8
+ },
+ {
+  "name": "Hudson River – Midtown",
+  "lat": 40.757,
+  "lon": -74.005,
+  "r": 0.8
+ },
+ {
+  "name": "Hudson River – Upper West Side",
+  "lat": 40.8,
+  "lon": -73.98,
+  "r": 0.9
+ },
+ {
+  "name": "Hudson River – George Washington Bridge",
+  "lat": 40.852,
+  "lon": -73.953,
+  "r": 1.0
+ },
+ {
+  "name": "Hudson River – Yonkers",
+  "lat": 40.94,
+  "lon": -73.91,
+  "r": 1.5
+ },
+ {
+  "name": "Hudson River – Tappan Zee",
+  "lat": 41.07,
+  "lon": -73.9,
+  "r": 2.0
+ },
+ {
+  "name": "Hudson River – Haverstraw Bay",
+  "lat": 41.2,
+  "lon": -73.95,
+  "r": 2.0
+ },
+ {
+  "name": "Hudson River – Bear Mountain",
+  "lat": 41.32,
+  "lon": -73.985,
+  "r": 2.0
+ },
+ {
+  "name": "Hudson River – West Point",
+  "lat": 41.39,
+  "lon": -73.96,
+  "r": 2.0
+ },
+ {
+  "name": "Hudson River – Newburgh / Beacon",
+  "lat": 41.5,
+  "lon": -73.99,
+  "r": 2.5
+ },
+ {
+  "name": "Hudson River – Poughkeepsie",
+  "lat": 41.7,
+  "lon": -73.94,
+  "r": 3.0
+ },
+ {
+  "name": "East River – Brooklyn Bridge",
+  "lat": 40.706,
+  "lon": -73.997,
+  "r": 0.7
+ },
+ {
+  "name": "East River – Williamsburg",
+  "lat": 40.715,
+  "lon": -73.968,
+  "r": 0.7
+ },
+ {
+  "name": "East River – Roosevelt Island",
+  "lat": 40.762,
+  "lon": -73.95,
+  "r": 0.8
+ },
+ {
+  "name": "Hell Gate",
+  "lat": 40.78,
+  "lon": -73.925,
+  "r": 0.8
+ },
+ {
+  "name": "Upper Bay",
+  "lat": 40.665,
+  "lon": -74.045,
+  "r": 1.4
+ },
+ {
+  "name": "Verrazzano Narrows",
+  "lat": 40.606,
+  "lon": -74.045,
+  "r": 1.0
+ },
+ {
+  "name": "Lower Bay",
+  "lat": 40.53,
+  "lon": -74.02,
+  "r": 3.0
+ },
+ {
+  "name": "Raritan Bay",
+  "lat": 40.47,
+  "lon": -74.2,
+  "r": 3.0
+ },
+ {
+  "name": "Sandy Hook",
+  "lat": 40.43,
+  "lon": -73.99,
+  "r": 1.5
+ },
+ {
+  "name": "Jamaica Bay",
+  "lat": 40.61,
+  "lon": -73.84,
+  "r": 2.5
+ },
+ {
+  "name": "Rockaway Inlet",
+  "lat": 40.565,
+  "lon": -73.92,
+  "r": 1.0
+ },
+ {
+  "name": "Newark Bay",
+  "lat": 40.68,
+  "lon": -74.13,
+  "r": 1.4
+ },
+ {
+  "name": "Arthur Kill",
+  "lat": 40.58,
+  "lon": -74.2,
+  "r": 1.5
+ },
+ {
+  "name": "Kill Van Kull",
+  "lat": 40.64,
+  "lon": -74.13,
+  "r": 1.0
+ },
+ {
+  "name": "Central Park",
+  "lat": 40.782,
+  "lon": -73.965,
+  "r": 0.8
+ },
+ {
+  "name": "Midtown Manhattan",
+  "lat": 40.755,
+  "lon": -73.985,
+  "r": 0.7
+ },
+ {
+  "name": "Lower Manhattan",
+  "lat": 40.712,
+  "lon": -74.008,
+  "r": 0.5
+ },
+ {
+  "name": "Harlem",
+  "lat": 40.81,
+  "lon": -73.945,
+  "r": 1.0
+ },
+ {
+  "name": "Bronx",
+  "lat": 40.85,
+  "lon": -73.88,
+  "r": 3.0
+ },
+ {
+  "name": "Brooklyn",
+  "lat": 40.65,
+  "lon": -73.95,
+  "r": 3.5
+ },
+ {
+  "name": "Queens",
+  "lat": 40.73,
+  "lon": -73.8,
+  "r": 3.5
+ },
+ {
+  "name": "Staten Island",
+  "lat": 40.58,
+  "lon": -74.15,
+  "r": 4.0
+ },
+ {
+  "name": "Hoboken / Weehawken",
+  "lat": 40.76,
+  "lon": -74.03,
+  "r": 0.8
+ },
+ {
+  "name": "Jersey City",
+  "lat": 40.72,
+  "lon": -74.06,
+  "r": 1.0
+ },
+ {
+  "name": "Bayonne",
+  "lat": 40.67,
+  "lon": -74.11,
+  "r": 1.0
+ },
+ {
+  "name": "Meadowlands",
+  "lat": 40.8,
+  "lon": -74.07,
+  "r": 2.0
+ },
+ {
+  "name": "Palisades",
+  "lat": 40.83,
+  "lon": -73.97,
+  "r": 1.5
+ },
+ {
+  "name": "Hackensack",
+  "lat": 40.885,
+  "lon": -74.045,
+  "r": 2.0
+ },
+ {
+  "name": "Paterson",
+  "lat": 40.915,
+  "lon": -74.17,
+  "r": 3.0
+ },
+ {
+  "name": "Morristown area",
+  "lat": 40.8,
+  "lon": -74.48,
+  "r": 4.0
+ },
+ {
+  "name": "Long Island Sound – Throgs Neck",
+  "lat": 40.8,
+  "lon": -73.79,
+  "r": 1.5
+ },
+ {
+  "name": "Long Island Sound – Rye / Glen Cove",
+  "lat": 40.9,
+  "lon": -73.68,
+  "r": 3.0
+ },
+ {
+  "name": "Long Island Sound – Stamford",
+  "lat": 41.0,
+  "lon": -73.5,
+  "r": 4.0
+ },
+ {
+  "name": "Long Island Sound – Bridgeport",
+  "lat": 41.12,
+  "lon": -73.15,
+  "r": 5.0
+ },
+ {
+  "name": "Long Island Sound – New Haven",
+  "lat": 41.2,
+  "lon": -72.85,
+  "r": 5.0
+ },
+ {
+  "name": "Long Island Sound – Orient / Plum Island",
+  "lat": 41.17,
+  "lon": -72.2,
+  "r": 5.0
+ },
+ {
+  "name": "Nassau County",
+  "lat": 40.73,
+  "lon": -73.59,
+  "r": 5.0
+ },
+ {
+  "name": "Jones Beach",
+  "lat": 40.595,
+  "lon": -73.51,
+  "r": 3.0
+ },
+ {
+  "name": "Fire Island",
+  "lat": 40.68,
+  "lon": -73.05,
+  "r": 6.0
+ },
+ {
+  "name": "Great South Bay",
+  "lat": 40.7,
+  "lon": -73.15,
+  "r": 5.0
+ },
+ {
+  "name": "Moriches Bay",
+  "lat": 40.78,
+  "lon": -72.75,
+  "r": 3.0
+ },
+ {
+  "name": "Shinnecock Bay",
+  "lat": 40.85,
+  "lon": -72.5,
+  "r": 3.0
+ },
+ {
+  "name": "Southampton",
+  "lat": 40.88,
+  "lon": -72.39,
+  "r": 2.5
+ },
+ {
+  "name": "Bridgehampton / Sag Harbor",
+  "lat": 40.95,
+  "lon": -72.3,
+  "r": 3.0
+ },
+ {
+  "name": "Amagansett / Napeague",
+  "lat": 41.0,
+  "lon": -72.08,
+  "r": 3.0
+ },
+ {
+  "name": "Montauk Point",
+  "lat": 41.07,
+  "lon": -71.86,
+  "r": 3.0
+ },
+ {
+  "name": "Gardiners Bay",
+  "lat": 41.08,
+  "lon": -72.18,
+  "r": 4.0
+ },
+ {
+  "name": "Peconic Bay",
+  "lat": 40.95,
+  "lon": -72.45,
+  "r": 4.0
+ },
+ {
+  "name": "North Fork",
+  "lat": 41.05,
+  "lon": -72.45,
+  "r": 4.0
+ },
+ {
+  "name": "Block Island Sound",
+  "lat": 41.2,
+  "lon": -71.75,
+  "r": 6.0
+ },
+ {
+  "name": "Block Island",
+  "lat": 41.17,
+  "lon": -71.58,
+  "r": 3.0
+ },
+ {
+  "name": "Atlantic – off Long Beach",
+  "lat": 40.55,
+  "lon": -73.65,
+  "r": 4.0
+ },
+ {
+  "name": "Atlantic – off Fire Island",
+  "lat": 40.6,
+  "lon": -73.1,
+  "r": 8.0
+ },
+ {
+  "name": "Atlantic – off the Hamptons",
+  "lat": 40.8,
+  "lon": -72.4,
+  "r": 8.0
+ },
+ {
+  "name": "Atlantic – off Sandy Hook",
+  "lat": 40.4,
+  "lon": -73.85,
+  "r": 6.0
+ },
+ {
+  "name": "NJ Shore – Long Branch",
+  "lat": 40.3,
+  "lon": -73.99,
+  "r": 3.0
+ },
+ {
+  "name": "NJ Shore – Asbury Park",
+  "lat": 40.22,
+  "lon": -74.0,
+  "r": 3.0
+ },
+ {
+  "name": "NJ Shore – Manasquan / Point Pleasant",
+  "lat": 40.09,
+  "lon": -74.04,
+  "r": 3.0
+ },
+ {
+  "name": "Barnegat Bay",
+  "lat": 39.85,
+  "lon": -74.12,
+  "r": 6.0
+ },
+ {
+  "name": "Long Beach Island",
+  "lat": 39.65,
+  "lon": -74.18,
+  "r": 6.0
+ },
+ {
+  "name": "Atlantic City coast",
+  "lat": 39.35,
+  "lon": -74.45,
+  "r": 5.0
+ },
+ {
+  "name": "Cape May",
+  "lat": 38.95,
+  "lon": -74.9,
+  "r": 6.0
+ },
+ {
+  "name": "Westchester",
+  "lat": 41.05,
+  "lon": -73.78,
+  "r": 4.0
+ },
+ {
+  "name": "Greenwich",
+  "lat": 41.03,
+  "lon": -73.63,
+  "r": 2.5
+ },
+ {
+  "name": "Norwalk",
+  "lat": 41.1,
+  "lon": -73.42,
+  "r": 3.0
+ },
+ {
+  "name": "Danbury",
+  "lat": 41.37,
+  "lon": -73.48,
+  "r": 4.0
+ },
+ {
+  "name": "Hartford area",
+  "lat": 41.76,
+  "lon": -72.68,
+  "r": 8.0
+ },
+ {
+  "name": "Catskills",
+  "lat": 41.95,
+  "lon": -74.4,
+  "r": 15.0
+ },
+ {
+  "name": "Delaware Water Gap",
+  "lat": 40.97,
+  "lon": -75.13,
+  "r": 5.0
+ },
+ {
+  "name": "Poconos",
+  "lat": 41.1,
+  "lon": -75.35,
+  "r": 12.0
+ },
+ {
+  "name": "Narragansett Bay",
+  "lat": 41.6,
+  "lon": -71.35,
+  "r": 5.0
+ },
+ {
+  "name": "Rhode Island Sound",
+  "lat": 41.3,
+  "lon": -71.3,
+  "r": 8.0
+ },
+ {
+  "name": "Buzzards Bay",
+  "lat": 41.55,
+  "lon": -70.85,
+  "r": 6.0
+ },
+ {
+  "name": "Nantucket Sound",
+  "lat": 41.4,
+  "lon": -70.3,
+  "r": 8.0
+ },
+ {
+  "name": "Cape Cod Bay",
+  "lat": 41.9,
+  "lon": -70.3,
+  "r": 10.0
+ },
+ {
+  "name": "Boston Harbor",
+  "lat": 42.35,
+  "lon": -70.95,
+  "r": 4.0
+ },
+ {
+  "name": "Massachusetts Bay",
+  "lat": 42.4,
+  "lon": -70.7,
+  "r": 10.0
+ },
+ {
+  "name": "Philadelphia area",
+  "lat": 39.95,
+  "lon": -75.17,
+  "r": 6.0
+ },
+ {
+  "name": "Delaware Bay",
+  "lat": 39.1,
+  "lon": -75.2,
+  "r": 12.0
+ },
+ {
+  "name": "Chesapeake Bay",
+  "lat": 38.9,
+  "lon": -76.4,
+  "r": 15.0
+ },
+ {
+  "name": "Potomac River – Washington DC",
+  "lat": 38.88,
+  "lon": -77.03,
+  "r": 3.0
+ },
+ {
+  "name": "Baltimore area",
+  "lat": 39.29,
+  "lon": -76.61,
+  "r": 6.0
+ },
+ {
+  "name": "Biscayne Bay",
+  "lat": 25.75,
+  "lon": -80.2,
+  "r": 5.0
+ },
+ {
+  "name": "Intracoastal – Fort Lauderdale",
+  "lat": 26.12,
+  "lon": -80.11,
+  "r": 5.0
+ },
+ {
+  "name": "Intracoastal – Palm Beach",
+  "lat": 26.7,
+  "lon": -80.05,
+  "r": 5.0
+ },
+ {
+  "name": "Everglades",
+  "lat": 25.9,
+  "lon": -80.6,
+  "r": 15.0
+ },
+ {
+  "name": "Atlantic – off Miami",
+  "lat": 25.8,
+  "lon": -80.05,
+  "r": 6.0
+ }
+]

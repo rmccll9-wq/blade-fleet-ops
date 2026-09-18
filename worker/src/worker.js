@@ -41,6 +41,7 @@ const DEFAULT_LOCATIONS=[ // fallback only; the live list comes from locations.j
 let LOCATIONS=DEFAULT_LOCATIONS;
 const EVENT_ALT=500,MAX_NEAR_NM=10;
 const LOCATIONS_URL='https://rmccll9-wq.github.io/blade-fleet-ops/locations.json',LOCATIONS_EVERY_MS=5*60e3;
+const WAYPOINTS_URL='https://rmccll9-wq.github.io/blade-fleet-ops/waypoints.json';let WAYPOINTS=[];
 const LOST_SEC=90,ARRIVE_MAX_ALT=1500,DEPART_MAX_ALT=2500,EVENT_GAP_SEC=300,LK_MAX_H=48;
 const FEEDS=['https://api.adsb.lol/v2/icao/','https://opendata.adsb.fi/api/v2/icao/'];
 const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
@@ -172,6 +173,26 @@ async function getLocations(env){
   return LOCATIONS;
 }
 
+async function getWaypoints(env){
+  const now=Date.now(),cached=await env.KV.get('waypoints','json');
+  if(cached&&cached.list&&now-(cached.fetchedAt||0)<LOCATIONS_EVERY_MS){WAYPOINTS=cached.list;return WAYPOINTS;}
+  try{const r=await fetch(WAYPOINTS_URL+'?ts='+now,{signal:AbortSignal.timeout(8000)});
+    if(r.ok){const list=await r.json();const clean=(Array.isArray(list)?list:[]).filter(w=>w&&w.name&&typeof w.lat==='number'&&typeof w.lon==='number'&&w.r>0);
+      WAYPOINTS=clean;await env.KV.put('waypoints',JSON.stringify({list:clean,fetchedAt:now}));return WAYPOINTS;}}catch(e){}
+  WAYPOINTS=(cached&&cached.list)||[];return WAYPOINTS;
+}
+// Position in words, for Slack: named area if inside one, else bearing/distance from the nearest station.
+function nearestAny(lat,lon){let best=null,bd=Infinity;for(const L of LOCATIONS){const d=haversineNm(lat,lon,L.lat,L.lon);if(d<bd){bd=d;best=L;}}return best?{loc:best,dist:bd}:null;}
+function bearingDeg(la1,lo1,la2,lo2){const r=Math.PI/180,y=Math.sin((lo2-lo1)*r)*Math.cos(la2*r),x=Math.cos(la1*r)*Math.sin(la2*r)-Math.sin(la1*r)*Math.cos(la2*r)*Math.cos((lo2-lo1)*r);return(Math.atan2(y,x)*180/Math.PI+360)%360;}
+const COMPASS16=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'],COMPASS8=['N','NE','E','SE','S','SW','W','NW'];
+function compass(deg,pts){const names=pts===8?COMPASS8:COMPASS16,n=names.length;return names[Math.round((((deg%360)+360)%360)/(360/n))%n];}
+function nearestWaypoint(lat,lon){let best=null,br=Infinity;for(const w of WAYPOINTS){const d=haversineNm(lat,lon,w.lat,w.lon);if(d<=w.r&&d/w.r<br){br=d/w.r;best=w;}}return best;}
+function describePos(lat,lon,track,airborne){
+  const st=nearestAny(lat,lon),wp=nearestWaypoint(lat,lon);
+  const where=wp?((airborne?'over ':'near ')+wp.name):st?(st.dist.toFixed(0)+' nm '+compass(bearingDeg(st.loc.lat,st.loc.lon,lat,lon))+' of '+st.loc.name):(lat.toFixed(3)+', '+lon.toFixed(3));
+  return{where,hdg:(airborne&&typeof track==='number')?compass(track,8):null,station:st,inArea:!!wp};
+}
+
 // ---- fleet list (KV, seeded from TAILS) ----
 async function getTails(env){
   const t=await env.KV.get('tails','json');
@@ -231,14 +252,24 @@ async function handleMessage(env,ev,mentioned){
 }
 // Plain-language parsing: "add N84BL Robby's 407", "please remove N84BL", "where is N92N", "list", "status".
 const KEYWORDS=[[/\b(add|track|start tracking|watch|include)\b/i,'add'],[/\b(remove|delete|untrack|stop tracking|drop|exclude)\b/i,'remove'],
-  [/\b(list|fleet|tails|tracking)\b/i,'list'],[/\b(status|health|alive|working)\b/i,'status'],[/\b(help|commands)\b/i,'help']];
+  [/\b(where|find|locate|position of)\b/i,'lookup'],[/\b(list|fleet|tails|tracking)\b/i,'list'],[/\b(status|health|alive|working)\b/i,'status'],[/\b(help|commands)\b/i,'help']];
 function findTail(text){
   const m=/\b(N[1-9][0-9]{0,4}[A-Z]{0,2})\b/i.exec(text)||/\b([0-9A-F]{6})\b/i.exec(text);
   return m?{token:m[1].toUpperCase(),index:m.index,length:m[1].length}:null;
 }
+function countTails(text){return new Set([...text.matchAll(/\b(N[1-9][0-9]{0,4}[A-Z]{0,2})\b/gi)].map(m=>m[1].toUpperCase())).size;}
+const LABEL_MAX=40;
 function parseCommand(rawText,mentioned){
   const text=(rawText||'').replace(/<@[^>]+>/g,' ').replace(/[‘’]/g,"'").replace(/\s+/g,' ').trim();
   const tail=findTail(text);
+  const words=text.split(' ').filter(Boolean);
+  // Guard rails so instructions, examples and chatter are never treated as commands:
+  //  - quoted command examples ("add N123AB ...") or bullet lists are documentation, not requests
+  //  - a message naming several different tails is ambiguous
+  //  - a plain (un-mentioned) request must be short and start with the command word
+  if(/["'`\u201c]\s*(add|remove|track|untrack|delete|where|list|status)\b/i.test(text)||/[\u2022]/.test(text))return null;
+  if(countTails(text)>1&&!mentioned)return null;
+  if(!mentioned&&(words.length>12||!KEYWORDS.some(([re])=>re.test(words.slice(0,3).join(' ')))))return null;
   let cmd=null;for(const [re,name] of KEYWORDS){if(re.test(text)){cmd=name;break;}}
   if(cmd==='list'&&tail)cmd=null; // "who is N84BL" -> a lookup, not the fleet list
   if(!cmd&&tail)cmd='lookup';
@@ -246,23 +277,31 @@ function parseCommand(rawText,mentioned){
   // Without a direct mention, a bare list/status/help only counts when the message is short and clearly aimed at the bot.
   if(!mentioned&&!tail&&(cmd==='list'||cmd==='status'||cmd==='help')&&text.split(' ').length>4)return null;
   if((cmd==='add'||cmd==='remove'||cmd==='lookup')&&!tail)return mentioned?{cmd:'help',text}:null;
+  if(cmd==='lookup'&&!mentioned&&!/^(where|find|locate|who|what|is)\b/i.test(text)&&!/^N[1-9]/i.test(text))return null; // "where is N92N" yes; a tail mentioned mid-sentence no
   let label='';
   if(cmd==='add'&&tail){
     label=text.slice(tail.index+tail.length).replace(/^[\s,.:;-]+/,'')
       .replace(/^(to|into|on|in)\s+(the\s+|our\s+)?(tracker|fleet|list|dashboard)\b[\s,.:;-]*/i,'')
       .replace(/^(as|called|named?|label(l?ed)?|with label|it'?s)\s+/i,'')
       .replace(/\b(please|thanks|thank you|pls)\b/gi,'').replace(/[\s,.!?"]+$/,'').replace(/^["']|["']$/g,'').trim();
+    if(label.length>LABEL_MAX||/["\u2022]/.test(label)||countTails(label)>0)label=''; // not a label: drop it rather than store junk
   }
   return{cmd,tail:tail?tail.token:null,label,text};
 }
 function tailName(t){return hexToN(t.hex)||t.hex.toUpperCase();}
 function describeTail(t,s){
   const st=!s?'no data yet':s.status==='airborne'?'airborne'+(s.alt!=null?' at '+Math.round(s.alt).toLocaleString()+' ft':''):s.status==='ground'?'on the ground':'not transmitting · last tracked '+fmtTime(s.lastSeen);
-  const loc=s&&s.nearest?` · ${s.nearest.name} ${s.nearest.dist.toFixed(1)} nm`:(s&&s.lat!=null?` · ${s.lat.toFixed(3)}, ${s.lon.toFixed(3)}`:'');
-  return `*${tailName(t)}*${t.label?' ('+t.label+')':''} — ${st}${loc}`;
+  let where='';
+  if(s&&s.lat!=null){
+    const n=s.nearest;
+    if(n&&n.dist<=n.r)where=` · at ${n.name}`;
+    else{const d=describePos(s.lat,s.lon,s.track,s.status==='airborne');
+      where=` · ${d.where}`+(d.hdg?`, heading ${d.hdg}`:'')+(d.inArea&&d.station?` · ${d.station.dist.toFixed(0)} nm from ${d.station.loc.id}`:'');}
+  }
+  return `*${tailName(t)}*${t.label?' ('+t.label+')':''} — ${st}${where}`;
 }
 async function runCommand(env,p){
-  const tails=await getTails(env);
+  const tails=await getTails(env);await getLocations(env);await getWaypoints(env);
   if(p.cmd==='add'){
     const hex=await resolveHex(p.tail);
     if(!hex)return `I couldn't match *${p.tail}* to an aircraft. Use a US N-number like N84BL or a 6-character ICAO hex.`;
@@ -349,7 +388,7 @@ async function sweep(env){
   const events=(await env.KV.get('events','json'))||[];
   const health=(await env.KV.get('health','json'))||{};
   const tails=await getTails(env);
-  await getLocations(env);
+  await getLocations(env);await getWaypoints(env);
   for(const k in state){const p=state[k];if(p&&p.lat!=null)p.nearest=snapNear(nearestLoc(p.lat,p.lon));} // re-evaluate stored positions against the current location table
   const fresh=await fetchFeed(tails);
   if(!fresh){await env.KV.put('health',JSON.stringify({...health,lastRun:now,ok:false,error:'feeds unavailable'}));return;}
@@ -362,7 +401,7 @@ async function sweep(env){
       const alt=altOf(ac),near=snapNear(nearestLoc(ac.lat,ac.lon));
       detectEvents(t,ac,prev,status,alt,near,now,events,out);
       state[t.hex]={status,alt,alt_baro:ac.alt_baro,lat:ac.lat,lon:ac.lon,nearest:near,
-        lastSeen:now-Math.round((ac.seen_pos!=null?ac.seen_pos:(ac.seen||0))*1000),ts:now,
+        lastSeen:now-Math.round((ac.seen_pos!=null?ac.seen_pos:(ac.seen||0))*1000),ts:now,track:typeof ac.track==='number'?ac.track:null,
         r:ac.r||(prev&&prev.r)||'',t:ac.t||(prev&&prev.t)||'',desc:ac.desc||(prev&&prev.desc)||'',flight:(ac.flight||'').trim()};
     }else handleLost(t,prev,now,events,out);
   }
@@ -399,4 +438,4 @@ async function postSlack(env,newEvents){
   }catch(e){return false;}
 }
 
-export {verifySlack,nToHex,hexToN,resolveHex,parseCommand};
+export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail};

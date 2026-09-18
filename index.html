@@ -382,6 +382,23 @@ async function loadLocations(){
     if(clean.length){LOCATIONS=clean;locationsLoaded=true;refreshNearest();}
   }catch(e){}
 }
+// Named geographic areas (rivers, bays, sounds, shorelines) from waypoints.json, used to describe positions away from stations.
+let WAYPOINTS=[];
+async function loadWaypoints(){
+  try{const r=await fetch('waypoints.json?ts='+Date.now(),{cache:'no-store'});if(!r.ok)return;const list=await r.json();
+    WAYPOINTS=(Array.isArray(list)?list:[]).filter(w=>w&&w.name&&typeof w.lat==='number'&&typeof w.lon==='number'&&w.r>0);}catch(e){}
+}
+function nearestAny(lat,lon){if(lat==null||lon==null)return null;let best=null,bd=Infinity;for(const L of LOCATIONS){const d=haversineNm(lat,lon,L.lat,L.lon);if(d<bd){bd=d;best=L;}}return best?{loc:best,dist:bd}:null;}
+function bearingDeg(la1,lo1,la2,lo2){const r=Math.PI/180,y=Math.sin((lo2-lo1)*r)*Math.cos(la2*r),x=Math.cos(la1*r)*Math.sin(la2*r)-Math.sin(la1*r)*Math.cos(la2*r)*Math.cos((lo2-lo1)*r);return(Math.atan2(y,x)*180/Math.PI+360)%360;}
+const COMPASS16=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'],COMPASS8=['N','NE','E','SE','S','SW','W','NW'];
+function compass(deg,pts){const names=pts===8?COMPASS8:COMPASS16,n=names.length;return names[Math.round((((deg%360)+360)%360)/(360/n))%n];}
+function nearestWaypoint(lat,lon){let best=null,br=Infinity;for(const w of WAYPOINTS){const d=haversineNm(lat,lon,w.lat,w.lon);if(d<=w.r&&d/w.r<br){br=d/w.r;best=w;}}return best;}
+// Human-readable position for a tail that is not at a station: named area if inside one, else bearing and distance from the nearest station.
+function describePos(lat,lon,track,airborne){
+  const st=nearestAny(lat,lon),wp=nearestWaypoint(lat,lon);
+  const where=wp?((airborne?'Over ':'Near ')+wp.name):st?(st.dist.toFixed(0)+' nm '+compass(bearingDeg(st.loc.lat,st.loc.lon,lat,lon))+' of '+st.loc.name):(lat.toFixed(3)+', '+lon.toFixed(3));
+  return{where,hdg:(airborne&&typeof track==='number')?compass(track,8):null,station:st};
+}
 // A tail is 'at' a location only when inside that location's own radius.
 function isAt(n){return !!n&&n.dist<=(n.loc.r||PROX_NM);}
 function haversineNm(la1,lo1,la2,lo2){
@@ -568,7 +585,7 @@ async function searchAnyTail(){
     // Build full detail rows
     const statusColor=status==='airborne'?'var(--accent)':status==='ground'?'var(--yellow)':'var(--muted)';
     const statusLabel=status==='airborne'?'\u25b2 Airborne':status==='ground'?'\u25cf On Ground':'\u25cb No Signal / Parked';
-    const nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null;
+    const nearest=ac.lat!=null?nearestAny(ac.lat,ac.lon):null;
 
     function row(label,val,color){
       return'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);">'+
@@ -583,7 +600,7 @@ async function searchAnyTail(){
     const vrStr=vrVal==null?'--':vrVal>100?'\u25b2 '+Math.round(vrVal)+' fpm':vrVal<-100?'\u25bc '+Math.abs(Math.round(vrVal))+' fpm':'Level';
     const vrColor=vrVal==null?'var(--muted)':vrVal>100?'var(--accent)':vrVal<-100?'var(--yellow)':'var(--muted)';
     const posStr=ac.lat!=null?ac.lat.toFixed(4)+'\u00b0, '+ac.lon.toFixed(4)+'\u00b0':'--';
-    const nearStr=nearest?nearest.loc.name+' ('+nearest.dist.toFixed(1)+' nm)':'--';
+    const nearStr=!nearest?'--':isAt(nearest)?nearest.loc.name+' ('+nearest.dist.toFixed(1)+' nm)':(()=>{const d=describePos(ac.lat,ac.lon,ac.track,getStatus(ac)==='airborne');return d.where+' \u00b7 '+nearest.dist.toFixed(1)+' nm from '+nearest.loc.id+(d.hdg?' \u00b7 hdg '+d.hdg:'');})();
 
     resultEl.innerHTML=
       '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-top:10px;">'+
@@ -865,16 +882,16 @@ function renderTable(){
   let rows=tails.map(t=>{
     let ac=allData.find(a=>a.hex===t.hex)||{hex:t.hex,seen:null,alt_baro:null,_offline:true};
     const status=getStatus(ac);
-    let nearest=ac.lat!=null?nearestLoc(ac.lat,ac.lon):null,lk=null;
+    let nearest=ac.lat!=null?nearestAny(ac.lat,ac.lon):null,lk=null,pos=ac.lat!=null?{lat:ac.lat,lon:ac.lon,track:ac.track}:null;
     if(status==='stale'){
       // No live signal: fall back to the last position recorded for this tail
       const p=prevStates[t.hex];
-      if(p&&p.lat!=null){lk=p;nearest=unsnapNear(p.nearest);ac={hex:t.hex,seen:null,alt_baro:null,_offline:true,r:p.r,t:p.t,desc:p.desc};}
+      if(p&&p.lat!=null){lk=p;nearest=nearestAny(p.lat,p.lon);pos={lat:p.lat,lon:p.lon,track:null};ac={hex:t.hex,seen:null,alt_baro:null,_offline:true,r:p.r,t:p.t,desc:p.desc};}
     }
     const isNear=isAt(nearest)&&(!lk||lkFresh(lk,nowTs));
     const tailMeta=tails.find(t=>t.hex===ac.hex);
     const isWatched=!!watchlist.find(w=>w.hex===ac.hex);
-    return{...ac,r:(ac.r||'').trim()||hexToN(ac.hex)||'',_status:status,_nearest:nearest,_isNear:isNear,_lk:lk,_label:tailMeta?tailMeta.label:'',_watched:isWatched};
+    return{...ac,r:(ac.r||'').trim()||hexToN(ac.hex)||'',_status:status,_nearest:nearest,_isNear:isNear,_lk:lk,_pos:pos,_label:tailMeta?tailMeta.label:'',_watched:isWatched};
   });
   if(currentFilter==='airborne')rows=rows.filter(r=>r._status==='airborne');
   else if(currentFilter==='ground')rows=rows.filter(r=>r._status==='ground');
@@ -903,8 +920,13 @@ function renderTable(){
     const dc=s==='airborne'?'sa':s==='ground'?'sg':'ss';
     const sl=s==='airborne'?'Airborne':s==='ground'?'On Ground':'No Signal';
     const n=ac._nearest,isN=ac._isNear,lk=ac._lk;
-    const locName=n?(lk?'<span class="lk">Last: </span>':'')+n.loc.name:(lk?'<span class="lk">Last: '+lk.lat.toFixed(3)+', '+lk.lon.toFixed(3)+'</span>':'--');
-    const locDist=n?n.dist.toFixed(1)+' nm':'--';
+    let locName='--',locDist='--';
+    if(n&&isN){locName=(lk?'<span class="lk">Last: </span>':'')+n.loc.name;locDist=n.dist.toFixed(1)+' nm';}
+    else if(ac._pos){
+      const d=describePos(ac._pos.lat,ac._pos.lon,ac._pos.track,s==='airborne');
+      locName=(lk?'<span class="lk">Last: </span>':'')+d.where+(d.hdg?' <span class="lk">\u00b7 hdg '+d.hdg+'</span>':'');
+      locDist=d.station?d.station.dist.toFixed(1)+' nm <span class="lk">('+d.station.loc.id+')</span>':'--';
+    }
     const badge=isN?(lk?'<span class="lk-badge">LAST</span>':s==='ground'?'<span class="at-badge">AT</span>':'<span class="prox-badge">NEAR</span>'):'';
     const wBadge=ac._watched?'<span class="watch-badge">\u2605</span>':'';
     const sc=lk?'lk':ac.seen>60?'seen-stale':'seen-ok';
@@ -984,7 +1006,7 @@ async function loadData(){
   }
 }
 
-function init(){loadLocations().then(()=>{refreshNearest();renderTable();updateStats();});setInterval(loadLocations,300000);refreshNearest();renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
+function init(){Promise.all([loadLocations(),loadWaypoints()]).then(()=>{refreshNearest();renderTable();updateStats();});setInterval(()=>{loadLocations();loadWaypoints();},300000);refreshNearest();renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
 if(sessionStorage.getItem('blade_auth')==='1')init();
 </script>
 </body>
