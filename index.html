@@ -415,18 +415,12 @@ function regOf(hex,live,label){return (live&&live.r&&live.r.trim())||hexToN(hex)
 
 // Tail store
 const DEFAULT_TAILS=[
+  // Shared fleet list (13 tails). Visitors start from this; local edits stay on their device.
   {hex:'acbcfd',label:''},{hex:'a81624',label:''},{hex:'ac1dbc',label:''},
-  {hex:'a928da',label:''},{hex:'aa8548',label:''},{hex:'a46819',label:''},
-  {hex:'a97c2e',label:''},{hex:'a81f62',label:''},{hex:'aa4414',label:''},
-  {hex:'aaea23',label:''},{hex:'aa83e8',label:''},{hex:'a20372',label:''},
-  {hex:'a4caee',label:''},{hex:'a4d375',label:''},{hex:'a46bd0',label:''},
-  {hex:'a5e880',label:''},{hex:'a4b1e8',label:''},{hex:'ae6a8a',label:''},
-  {hex:'a2a484',label:''},{hex:'a98020',label:''},{hex:'ab2ae6',label:''},
-  {hex:'a3b8e8',label:''},{hex:'a2bd59',label:''},{hex:'a04014',label:''},
-  {hex:'a0e20b',label:''},{hex:'ab7da4',label:''},{hex:'a25fcd',label:''},
-  {hex:'a28402',label:''},{hex:'a0de49',label:''},{hex:'ae4a89',label:''},
-  {hex:'a7fe65',label:''},{hex:'a45915',label:''},{hex:'a96eeb',label:''},
-  {hex:'a5818b',label:'N454FX'},
+  {hex:'a928da',label:''},{hex:'aa8548',label:''},{hex:'a5e880',label:''},
+  {hex:'a2a484',label:''},{hex:'ab7da4',label:''},{hex:'a45915',label:''},
+  {hex:'aa0cf4',label:'N747EE'},{hex:'a07ea1',label:'N1308'},
+  {hex:'a7143e',label:'N555ZA'},{hex:'aa416f',label:'N76ZA'},
 ];
 function loadTails(){try{const s=localStorage.getItem('blade_tails');return s?JSON.parse(s):DEFAULT_TAILS;}catch(e){return DEFAULT_TAILS;}}
 function saveTails(){localStorage.setItem('blade_tails',JSON.stringify(tails));}
