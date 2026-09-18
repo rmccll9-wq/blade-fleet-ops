@@ -250,7 +250,7 @@
           <button class="btn" onclick="toggleBulk()">Cancel</button>
         </div>
       </div>
-      <div class="tm-hint" id="tail-shared-note" style="display:none;margin-bottom:10px;font-size:11px;color:var(--muted)">The fleet list is shared across everyone. Add or remove tails from Slack: <b>@BLADE Fleet Ops add N12345 [label]</b> or <b>remove N12345</b>.</div>
+      <div class="tm-hint" id="tail-shared-note" style="display:none;margin-bottom:10px;font-size:11px;color:var(--muted)">The fleet list is shared across everyone. Add or remove tails by posting in Slack #blade-fleet-tracker: <b>add N12345 [label]</b> or <b>remove N12345</b>.</div>
       <div class="tail-grid" id="tail-grid"></div>
       <div class="tm-count" id="tm-count"></div>
     </div>
@@ -608,7 +608,7 @@ async function searchAnyTail(){
   }
 }
 function addFromSearch(){
-  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
+  if(serverMode){alert('The fleet list is shared. Add or remove tails by posting in Slack #blade-fleet-tracker: add N12345');return;}
   if(!lastSearchResult)return;
   const ac=lastSearchResult,hex=ac.hex.toLowerCase();
   if(tails.find(t=>t.hex===hex)){document.getElementById('add-from-search-btn').textContent='\u2713 In Fleet';return;}
@@ -637,7 +637,7 @@ function renderTailGrid(){
   if(serverMode)document.getElementById('bulk-area').style.display='none';
 }
 function addTail(){
-  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
+  if(serverMode){alert('The fleet list is shared. Add or remove tails by posting in Slack #blade-fleet-tracker: add N12345');return;}
   const hex=parseTailInput(document.getElementById('add-hex').value);
   const label=document.getElementById('add-label').value.trim();
   if(!hex){alert('Enter an N-number (e.g. N454FX) or 6-character ICAO hex');return;}
@@ -647,14 +647,14 @@ function addTail(){
   loadData();
 }
 function removeTail(i){
-  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
+  if(serverMode){alert('The fleet list is shared. Add or remove tails by posting in Slack #blade-fleet-tracker: add N12345');return;}
   const t=tails[i];
   if(!confirm('Remove '+(hexToN(t.hex)||t.hex.toUpperCase())+' from fleet?'))return;
   tails.splice(i,1);saveTails();renderTailGrid();
   allData=allData.filter(ac=>ac.hex!==t.hex);renderTable();updateStats();
 }
 function bulkAdd(){
-  if(serverMode){alert('The fleet list is shared. Add or remove tails in Slack: @BLADE Fleet Ops add N12345');return;}
+  if(serverMode){alert('The fleet list is shared. Add or remove tails by posting in Slack #blade-fleet-tracker: add N12345');return;}
   const tokens=document.getElementById('bulk-input').value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
   let added=0,skipped=0;
   tokens.forEach(tok=>{
