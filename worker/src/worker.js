@@ -15,6 +15,7 @@ const LOCATIONS=[
   {id:'JRB',name:'Downtown Manhattan HP',lat:40.7011,lon:-74.0090,r:0.5},
   {id:'E34',name:'East 34th St Heliport',lat:40.7428,lon:-73.9722,r:0.5},
   {id:'W30',name:'West 30th St Heliport',lat:40.7544,lon:-74.0072,r:0.5},
+  {id:'65NJ',name:'Helo Kearny (65NJ)',lat:40.7315,lon:-74.1168,r:0.5},
   {id:'TEB',name:'Teterboro (TEB)',lat:40.8501,lon:-74.0608,r:2.0},
   {id:'HPN',name:'Westchester (HPN)',lat:41.0670,lon:-73.7076,r:2.0},
   {id:'JFK',name:'JFK International',lat:40.6413,lon:-73.7781,r:2.0},
