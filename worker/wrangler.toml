@@ -1,0 +1,14 @@
+# BLADE Fleet Ops event worker. Deploy from this folder with: wrangler deploy
+name = "blade-fleet-events"
+main = "src/worker.js"
+compatibility_date = "2026-09-01"
+account_id = "d1be322958802f1805183230bd6e0c28"
+
+[triggers]
+crons = ["* * * * *"]   # every minute; each run samples twice (0s and 30s)
+
+[[kv_namespaces]]
+binding = "KV"
+id = "b82367d937d340be8dc5233db18872f2"
+
+# Secret, set once and never committed:  wrangler secret put SLACK_WEBHOOK
