@@ -271,5 +271,19 @@
   "lat": 40.3992,
   "lon": -74.6589,
   "r": 1.5
+ },
+ {
+  "id": "CDW",
+  "name": "Essex County Caldwell (CDW)",
+  "lat": 40.8752,
+  "lon": -74.2814,
+  "r": 1.5
+ },
+ {
+  "id": "LDJ",
+  "name": "Linden (LDJ)",
+  "lat": 40.6174,
+  "lon": -74.2446,
+  "r": 1.5
  }
 ]
