@@ -704,6 +704,8 @@ const EVENT_GAP_SEC=300;    // suppress a repeat of the same event type for a ta
 const LK_MAX_H=48;          // hours a last-known position is trusted (as a departure origin / "at" location)
 function loadJSON(k,d){try{const s=localStorage.getItem(k);return s?JSON.parse(s):d;}catch(e){return d;}}
 let prevStates=loadJSON(STATE_KEY,{}),events=loadJSON(EVENTS_KEY,[]);
+// Stored positions carry a nearest-location snapshot; recompute it so edits to LOCATIONS apply to old positions too.
+function refreshNearest(){for(const k in prevStates){const p=prevStates[k];if(p&&p.lat!=null)p.nearest=snapNear(nearestLoc(p.lat,p.lon));}}
 function saveState(){try{localStorage.setItem(STATE_KEY,JSON.stringify(prevStates));localStorage.setItem(EVENTS_KEY,JSON.stringify(events.slice(0,100)));}catch(e){}}
 function snapNear(n){return n?{id:n.loc.id,name:n.loc.name,r:n.loc.r,dist:n.dist}:null;}
 function unsnapNear(s){return s?{loc:{id:s.id,name:s.name,r:s.r},dist:s.dist}:null;}
@@ -775,6 +777,7 @@ async function syncServer(force){
     if(sr.ok){
       const st=await sr.json();
       for(const hex in st){const p=prevStates[hex],q=st[hex];if(!q||q.lat==null)continue;if(!p||!p.lastSeen||(q.lastSeen||0)>p.lastSeen)prevStates[hex]={...q,fromServer:true};}
+      refreshNearest();
     }
     saveState();renderEvents();renderTable();updateStats();
   }catch(e){serverMode=false;renderTailGrid();}
@@ -971,7 +974,7 @@ async function loadData(){
   }
 }
 
-function init(){renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
+function init(){refreshNearest();renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
 if(sessionStorage.getItem('blade_auth')==='1')init();
 </script>
 </body>
