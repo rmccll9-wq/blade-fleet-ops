@@ -7,8 +7,11 @@ account_id = "d1be322958802f1805183230bd6e0c28"
 [vars]
 SLACK_CHANNEL_ID = "C0C2YS9G7PB"   # #blade-fleet-tracker: the bot reads this channel for plain-text commands
 
+[observability]
+enabled = true          # Workers Logs (paid plan): persistent logs in the Cloudflare dashboard
+
 [triggers]
-crons = ["* * * * *"]   # every minute; each run samples twice (0s and 30s)
+crons = ["* * * * *"]   # every minute; each run samples three times (0s, 20s, 40s)
 
 [[kv_namespaces]]
 binding = "KV"

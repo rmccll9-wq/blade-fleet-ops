@@ -49,7 +49,7 @@ const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
 // (same one the dashboard uses). It only forwards to the allow-listed feed hosts.
 const PROXY='https://blade-fleet-ops.vercel.app/api/proxy?u=';
 function upstream(u,ms){return fetch(PROXY+encodeURIComponent(u),{headers:{'Accept':'application/json'},signal:AbortSignal.timeout(ms||10000)});}
-const MAX_EVENTS=150,SAMPLE_GAP_MS=30000; // keep the stored log modest: the free plan allows 10 ms CPU per run
+const MAX_EVENTS=300,SAMPLES_PER_RUN=3,SAMPLE_GAP_MS=20000; // Workers Paid plan: sample every 20 s, keep 300 events
 const TZ='America/New_York';
 
 export default {
@@ -86,9 +86,10 @@ export default {
 };
 
 async function runSweeps(env){
-  await sweep(env);
-  await new Promise(r=>setTimeout(r,SAMPLE_GAP_MS));
-  await sweep(env);
+  for(let i=0;i<SAMPLES_PER_RUN;i++){
+    if(i)await new Promise(r=>setTimeout(r,SAMPLE_GAP_MS));
+    try{await sweep(env);}catch(e){console.error('sweep failed',e&&e.message);}
+  }
 }
 
 // ---- geometry / status (same as index.html) ----
