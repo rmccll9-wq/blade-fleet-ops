@@ -688,7 +688,7 @@ function nowTime(){return new Date().toLocaleTimeString('en-US',{hour:'2-digit',
 // Events + persistent per-tail state.
 // State survives reloads, so a tail that lands and drops off ADS-B is still known to be on the ground at that pad.
 const STATE_KEY='blade_state_v1',EVENTS_KEY='blade_events_v1';
-const LOST_SEC=90;          // airborne tail missing from the feed this long = signal lost
+const LOST_SEC=90;          // airborne tail missing from the feed this long = no longer tracked
 const ARRIVE_MAX_ALT=1500;  // ft: last-known altitude at signal loss must be below this to infer an arrival
 const DEPART_MAX_ALT=2500;  // ft: first-seen altitude must be below this to infer a departure from the current nearest location
 const EVENT_GAP_SEC=300;    // suppress a repeat of the same event type for a tail inside this window
@@ -729,6 +729,7 @@ function handleLost(hex,prev,now){
   prev.status='nosignal';prev.ts=now;
 }
 function pushEvent(type,hex,ac,loc,now,inferred){
+  if(serverMode)return; // the worker owns the event log
   if(events.find(e=>e.hex===hex&&e.type===type&&now-(e.ts||0)<EVENT_GAP_SEC*1000))return;
   const meta=tails.find(t=>t.hex===hex);
   events.unshift({type,hex,reg:regOf(hex,ac,meta?meta.label:''),locName:loc.name,dist:loc.dist.toFixed(2),callsign:(ac.flight||'').trim(),
@@ -736,7 +737,32 @@ function pushEvent(type,hex,ac,loc,now,inferred){
     ts:now,time:nowTime(),inferred:!!inferred,watched:!!watchlist.find(w=>w.hex===hex)});
   if(events.length>100)events.pop();
 }
-function clearEvents(){events=[];saveState();renderEvents();}
+function clearEvents(){events=[];clearedBefore=Date.now();try{localStorage.setItem('blade_events_cleared',String(clearedBefore));}catch(e){}saveState();renderEvents();}
+
+// Shared event log + last-known positions from the always-on worker (Cloudflare). When it answers, its event log
+// replaces local detection so every viewer sees the same history; if it is unreachable the page falls back to
+// detecting events itself.
+const EVENTS_API='https://blade-fleet-events.blade-fleet-ops.workers.dev',SYNC_EVERY_MS=30000;
+let serverMode=false,lastSync=0,clearedBefore=+(loadJSON('blade_events_cleared',0))||0;
+async function syncServer(force){
+  const now=Date.now();
+  if(!force&&now-lastSync<SYNC_EVERY_MS)return;
+  lastSync=now;
+  try{
+    const [er,sr]=await Promise.all([fetch(EVENTS_API+'/events',{cache:'no-store'}),fetch(EVENTS_API+'/state',{cache:'no-store'})]);
+    if(!er.ok)throw new Error('events '+er.status);
+    const list=await er.json();
+    events=list.filter(e=>e.ts>clearedBefore).map(e=>({type:e.type,hex:e.hex,reg:e.reg,locName:e.locName,dist:(+e.dist).toFixed(2),callsign:e.callsign||'',
+      icon:getAcIcon({t:e.acType||''}),alt:e.alt==null?'--':e.alt===0?'Ground':fmt(e.alt)+' ft',ts:e.ts,time:'',inferred:!!e.inferred,
+      watched:!!watchlist.find(w=>w.hex===e.hex)}));
+    serverMode=true;
+    if(sr.ok){
+      const st=await sr.json();
+      for(const hex in st){const p=prevStates[hex],q=st[hex];if(!q||q.lat==null)continue;if(!p||!p.lastSeen||(q.lastSeen||0)>p.lastSeen)prevStates[hex]={...q,fromServer:true};}
+    }
+    saveState();renderEvents();renderTable();updateStats();
+  }catch(e){serverMode=false;}
+}
 
 // Last-known backfill. The live feed only lists aircraft transmitting right now, so for silent tails we pull the
 // recent trace (last ~24h) and take its final point. History only; it never generates events.
@@ -789,7 +815,7 @@ function renderEvents(){
       '<span style="font-size:14px">'+ev.icon+'</span>'+
       '<span class="ev-reg">'+ev.reg+'</span>'+
       '<span class="ev-loc">'+ev.locName+(ev.callsign?' \u00b7 '+ev.callsign:'')+'</span>'+
-      '<span class="ev-detail">'+ev.alt+' \u00b7 '+ev.dist+' nm'+(ev.inferred?' \u00b7 <span class="inferred" title="Position inferred from where the signal was last seen">'+(ev.type==='DEPARTED'?'from last known':'signal lost')+'</span>':'')+'</span>'+
+      '<span class="ev-detail">'+ev.alt+' \u00b7 '+ev.dist+' nm'+(ev.inferred?' \u00b7 <span class="inferred" title="Estimated from the last tracked position">'+'est. from last position'+'</span>':'')+'</span>'+
       (ev.watched?'<span class="watch-badge">\u2605 watched</span>':'')+
       '<span class="ev-time">'+fmtEvTime(ev)+'</span>'+
     '</div>';
@@ -920,6 +946,7 @@ async function loadData(){
     allData=fresh;
     saveState();
     fetchLastKnown(false);
+    syncServer(false);
     updateStats();renderTable();renderEvents();renderWatchlist();
     document.getElementById('last-updated').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }catch(e){
@@ -928,7 +955,7 @@ async function loadData(){
   }
 }
 
-function init(){renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>fetchLastKnown(true));setInterval(loadData,15000);}
+function init(){renderTailGrid();renderWatchlist();renderEvents();renderTable();loadData().then(()=>{fetchLastKnown(true);syncServer(true);});setInterval(loadData,15000);}
 if(sessionStorage.getItem('blade_auth')==='1')init();
 </script>
 </body>
