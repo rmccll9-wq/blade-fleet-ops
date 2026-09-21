@@ -702,7 +702,7 @@ function togglePanel(bodyId,arrowId){
 
 // Status helpers
 function getStatus(ac){
-  if(!ac.lat||ac.seen>120)return'stale';
+  const age=ac.seen_pos!=null?ac.seen_pos:ac.seen;if(!ac.lat||age>LOST_SEC)return'stale';
   if(ac.alt_baro==='ground')return'ground';
   if(typeof ac.alt_baro==='number'&&ac.alt_baro>0)return'airborne';
   if(ac.gs>30)return'airborne';
@@ -724,7 +724,7 @@ function nowTime(){return new Date().toLocaleTimeString('en-US',{hour:'2-digit',
 // Events + persistent per-tail state.
 // State survives reloads, so a tail that lands and drops off ADS-B is still known to be on the ground at that pad.
 const STATE_KEY='blade_state_v1',EVENTS_KEY='blade_events_v1';
-const LOST_SEC=90;          // airborne tail missing from the feed this long = no longer tracked
+const LOST_SEC=60;          // seconds without a position report before a tail counts as no longer tracked
 const ARRIVE_MAX_ALT=1500;  // ft: last-known altitude at signal loss must be below this to infer an arrival
 const DEPART_MAX_ALT=2500;  // ft: first-seen altitude must be below this to infer a departure from the current nearest location
 const EVENT_GAP_SEC=300;    // suppress a repeat of the same event type for a tail inside this window

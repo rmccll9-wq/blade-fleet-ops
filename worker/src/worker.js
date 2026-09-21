@@ -42,7 +42,7 @@ let LOCATIONS=DEFAULT_LOCATIONS;
 const EVENT_ALT=500,MAX_NEAR_NM=10;
 const LOCATIONS_URL='https://rmccll9-wq.github.io/blade-fleet-ops/locations.json',LOCATIONS_EVERY_MS=5*60e3;
 const WAYPOINTS_URL='https://rmccll9-wq.github.io/blade-fleet-ops/waypoints.json';let WAYPOINTS=[];
-const LOST_SEC=90,ARRIVE_MAX_ALT=1500,DEPART_MAX_ALT=2500,EVENT_GAP_SEC=300,LK_MAX_H=48;
+const LOST_SEC=60,ARRIVE_MAX_ALT=1500,DEPART_MAX_ALT=2500,EVENT_GAP_SEC=300,LK_MAX_H=48; // LOST_SEC: seconds without a position report before a tail counts as no longer tracked
 const FEEDS=['https://api.adsb.lol/v2/icao/','https://opendata.adsb.fi/api/v2/icao/'];
 const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
 // The feeds rate-limit / block Cloudflare's shared egress IPs, so upstream requests go through the Vercel proxy
@@ -97,7 +97,7 @@ function haversineNm(la1,lo1,la2,lo2){const R=3440.065,r=Math.PI/180;const a=Mat
 function nearestLoc(lat,lon){if(lat==null||lon==null)return null;let best=null,bd=Infinity;for(const L of LOCATIONS){const d=haversineNm(lat,lon,L.lat,L.lon);if(d<bd){bd=d;best=L;}}if(bd>MAX_NEAR_NM)return null;return{loc:best,dist:bd};}
 function snapNear(n){return n?{id:n.loc.id,name:n.loc.name,r:n.loc.r,dist:n.dist}:null;}
 function nearForEvent(s){return !!s&&s.dist<=s.r+(s.r<1?0.5:1.0);}
-function getStatus(ac){if(!ac.lat||ac.seen>120)return'stale';if(ac.alt_baro==='ground')return'ground';if(typeof ac.alt_baro==='number'&&ac.alt_baro>0)return'airborne';if(ac.gs>30)return'airborne';return'ground';}
+function getStatus(ac){const age=ac.seen_pos!=null?ac.seen_pos:ac.seen;if(!ac.lat||age>LOST_SEC)return'stale';if(ac.alt_baro==='ground')return'ground';if(typeof ac.alt_baro==='number'&&ac.alt_baro>0)return'airborne';if(ac.gs>30)return'airborne';return'ground';}
 function altOf(ac){return typeof ac.alt_baro==='number'?ac.alt_baro:(ac.alt_baro==='ground'?0:null);}
 function lkFresh(p,now){return !!p&&!!p.lastSeen&&(now-p.lastSeen)<LK_MAX_H*3600e3;}
 function _nL(rem){if(rem==0)return"";--rem;return _LA[rem];}
@@ -137,26 +137,43 @@ function detectEvents(t,ac,prev,status,alt,near,now,events,out){
     let from=null;
     if(nearForEvent(prev.nearest)&&lkFresh(prev,now))from=prev.nearest;
     else if(alt!=null&&alt<=DEPART_MAX_ALT&&nearForEvent(near))from=near;
-    if(from)pushEvent(events,out,'DEPARTED',t,ac,from,now,prev.status==='nosignal');
+    if(from)pushEvent(events,out,'DEPARTED',t,ac,from,now,prev.status==='nosignal',prev);
   }else if(prev.status==='airborne'&&status==='ground'){
-    if(nearForEvent(near))pushEvent(events,out,'ARRIVED',t,ac,near,now,false);
+    if(nearForEvent(near))pushEvent(events,out,'ARRIVED',t,ac,near,now,false,prev);
   }else if(prev.status==='airborne'&&status==='airborne'&&alt!=null&&prev.alt!=null){
-    if(prev.alt<=EVENT_ALT&&alt>EVENT_ALT&&nearForEvent(prev.nearest))pushEvent(events,out,'DEPARTED',t,ac,prev.nearest,now,false);
-    else if(prev.alt>EVENT_ALT&&alt<=EVENT_ALT&&nearForEvent(near))pushEvent(events,out,'ARRIVED',t,ac,near,now,false);
+    if(prev.alt<=EVENT_ALT&&alt>EVENT_ALT&&nearForEvent(prev.nearest))pushEvent(events,out,'DEPARTED',t,ac,prev.nearest,now,false,prev);
+    else if(prev.alt>EVENT_ALT&&alt<=EVENT_ALT&&nearForEvent(near))pushEvent(events,out,'ARRIVED',t,ac,near,now,false,prev);
   }
 }
 function handleLost(t,prev,now,events,out){
   if(!prev||prev.status==='nosignal')return;
   if(now-prev.lastSeen<LOST_SEC*1000)return;
   if(prev.status==='airborne'&&prev.alt!=null&&prev.alt<=ARRIVE_MAX_ALT&&nearForEvent(prev.nearest))
-    pushEvent(events,out,'ARRIVED',t,prev,prev.nearest,now,true);
+    pushEvent(events,out,'ARRIVED',t,prev,prev.nearest,now,true,prev);
   prev.status='nosignal';prev.ts=now;
 }
-function pushEvent(events,out,type,t,ac,loc,now,inferred){
-  if([...out,...events].find(e=>e.hex===t.hex&&e.type===type&&now-(e.ts||0)<EVENT_GAP_SEC*1000))return;
-  out.push({type,hex:t.hex,reg:regOf(t.hex,ac,t.label),label:t.label||'',locName:loc.name,locId:loc.id,dist:+loc.dist.toFixed(2),
+function makeEvent(type,t,ac,loc,ts,inferred,synth){
+  return{type,hex:t.hex,reg:regOf(t.hex,ac,t.label),label:t.label||'',locName:loc.name,locId:loc.id,dist:+(loc.dist||0).toFixed(2),
     callsign:(ac.flight||'').trim(),acType:ac.t||'',alt:typeof ac.alt_baro==='number'?Math.round(ac.alt_baro):(ac.alt_baro==='ground'?0:null),
-    ts:now,inferred:!!inferred});
+    ts,inferred:!!inferred,synth:!!synth};
+}
+// Every leg should have both ends. If a tail arrives somewhere new without a departure on record (or departs a place it
+// was never logged arriving at), the missing event is reconstructed from where the tail was last seen near a location.
+function pushEvent(events,out,type,t,ac,loc,now,inferred,prev){
+  const mine=[...out,...events].filter(e=>e.hex===t.hex).sort((a,b)=>b.ts-a.ts),last=mine[0];
+  if(last&&last.type===type&&last.locId===loc.id)return; // same event at the same place again: a repeat, not a new leg
+  if([...out,...events].find(e=>e.hex===t.hex&&e.type===type&&now-(e.ts||0)<EVENT_GAP_SEC*1000))return;
+  if(last&&last.type===type){
+    const dwell=prev||{};
+    if(type==='ARRIVED'){ // it must have left the previous location: use the last moment it was seen near there
+      const depTs=(dwell.nearLoc&&dwell.nearLoc.id===last.locId&&dwell.nearLast>last.ts)?dwell.nearLast:last.ts+60000;
+      out.push(makeEvent('DEPARTED',t,ac,{id:last.locId,name:last.locName,dist:last.dist},Math.min(depTs,now-1000),true,true));
+    }else{ // it must have arrived here first: use the moment it first came near this location
+      const arrTs=(dwell.nearLoc&&dwell.nearLoc.id===loc.id&&dwell.nearSince>last.ts)?dwell.nearSince:Math.max(last.ts+60000,now-60000);
+      out.push(makeEvent('ARRIVED',t,ac,loc,Math.min(arrTs,now-1000),true,true));
+    }
+  }
+  out.push(makeEvent(type,t,ac,loc,now,inferred,false));
 }
 
 // ---- locations (locations.json on GitHub Pages, cached in KV, refreshed every 5 min) ----
@@ -401,7 +418,11 @@ async function sweep(env){
     if(ac&&status!=='stale'){
       const alt=altOf(ac),near=snapNear(nearestLoc(ac.lat,ac.lon));
       detectEvents(t,ac,prev,status,alt,near,now,events,out);
-      state[t.hex]={status,alt,alt_baro:ac.alt_baro,lat:ac.lat,lon:ac.lon,nearest:near,
+      // Dwell tracking: which location the tail is (or was last) near, since when, and until when. Used to time reconstructed events.
+      const nearEv=nearForEvent(near)?near:null,pn=prev||{};
+      const dwell=nearEv?{nearLoc:nearEv,nearSince:(pn.nearLoc&&pn.nearLoc.id===nearEv.id&&pn.nearSince)?pn.nearSince:now,nearLast:now}
+                        :{nearLoc:pn.nearLoc||null,nearSince:pn.nearSince||null,nearLast:pn.nearLast||null};
+      state[t.hex]={...dwell,status,alt,alt_baro:ac.alt_baro,lat:ac.lat,lon:ac.lon,nearest:near,
         lastSeen:now-Math.round((ac.seen_pos!=null?ac.seen_pos:(ac.seen||0))*1000),ts:now,track:typeof ac.track==='number'?ac.track:null,
         r:ac.r||(prev&&prev.r)||'',t:ac.t||(prev&&prev.t)||'',desc:ac.desc||(prev&&prev.desc)||'',flight:(ac.flight||'').trim()};
     }else handleLost(t,prev,now,events,out);
@@ -412,7 +433,7 @@ async function sweep(env){
   if(out.length){
     events.unshift(...out.slice().reverse());
     events.length=Math.min(events.length,MAX_EVENTS);
-    slackOk=await postSlack(env,out);
+    slackOk=await postSlack(env,out,events);
   }
   await env.KV.put('state',JSON.stringify(state));
   await env.KV.put('events',JSON.stringify(events));
@@ -426,17 +447,40 @@ function slackLine(e){
   const arrow=e.type==='DEPARTED'?':small_red_triangle:':':large_green_circle:'; // red up-triangle = departed, green circle = arrived
   const verb=e.type==='DEPARTED'?'departed':'arrived at';
   const alt=e.alt==null?'':e.alt===0?' · on ground':' · '+e.alt.toLocaleString()+' ft';
-  const note=e.inferred?' · _estimated from last tracked position_':'';
+  const note=e.synth?' · _estimated (leg reconstructed)_':e.inferred?' · _estimated from last tracked position_':'';
   const cs=e.callsign&&e.callsign!==e.reg?' ('+e.callsign+')':'';
   return `${arrow} *${e.reg}*${cs} ${verb} *${e.locName}* — ${fmtTime(e.ts)}${alt} · ${e.dist} nm${note}`;
 }
-async function postSlack(env,newEvents){
-  if(!env.SLACK_WEBHOOK)return false;
-  try{
-    const r=await fetch(env.SLACK_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:newEvents.map(slackLine).join('\n'),unfurl_links:false})});
-    return r.ok;
-  }catch(e){return false;}
+function fmtDur(ms){const m=Math.max(1,Math.round(ms/60000));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')+' min';}
+// The leg an arrival completes: the tail's immediately preceding event must be a departure.
+function legFor(arr,allEvents){
+  const prev=allEvents.filter(e=>e.hex===arr.hex&&e.ts<arr.ts).sort((a,b)=>b.ts-a.ts)[0];
+  if(!prev||prev.type!=='DEPARTED')return null;
+  const a=LOCATIONS.find(l=>l.id===prev.locId),b=LOCATIONS.find(l=>l.id===arr.locId);
+  return{from:prev,to:arr,ete:arr.ts-prev.ts,nm:(a&&b)?haversineNm(a.lat,a.lon,b.lat,b.lon):null,estimated:!!(prev.inferred||arr.inferred)};
+}
+function legLine(leg){
+  return `:arrow_right: Route: *${leg.from.locName}* \u2192 *${leg.to.locName}* \u00b7 ETE ${fmtDur(leg.ete)}`+(leg.nm!=null?` \u00b7 ${leg.nm.toFixed(0)} nm`:'')+(leg.estimated?' \u00b7 _times estimated_':'');
+}
+async function slackSend(env,text,thread_ts){
+  if(env.SLACK_BOT_TOKEN&&env.SLACK_CHANNEL_ID){
+    try{const r=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
+        body:JSON.stringify({channel:env.SLACK_CHANNEL_ID,text,thread_ts,unfurl_links:false})});
+      const j=await r.json();if(j.ok)return j.ts||true;}catch(e){}
+  }
+  if(!thread_ts&&env.SLACK_WEBHOOK){ // fallback: webhook (cannot thread)
+    try{const r=await fetch(env.SLACK_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,unfurl_links:false})});return r.ok?true:null;}catch(e){}
+  }
+  return null;
+}
+async function postSlack(env,newEvents,allEvents){
+  let ok=true;
+  for(const e of newEvents.slice().sort((a,b)=>a.ts-b.ts)){
+    const ts=await slackSend(env,slackLine(e));
+    if(ts===null){ok=false;continue;}
+    if(e.type==='ARRIVED'&&typeof ts==='string'){const leg=legFor(e,allEvents);if(leg)await slackSend(env,legLine(leg),ts);}
+  }
+  return ok;
 }
 
-export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail};
+export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus};
