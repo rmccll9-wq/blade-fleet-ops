@@ -49,7 +49,7 @@ const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
 // (same one the dashboard uses). It only forwards to the allow-listed feed hosts.
 const PROXY='https://blade-fleet-ops.vercel.app/api/proxy?u=';
 function upstream(u,ms){return fetch(PROXY+encodeURIComponent(u),{headers:{'Accept':'application/json'},signal:AbortSignal.timeout(ms||10000)});}
-const MAX_EVENTS=300,SAMPLES_PER_RUN=3,SAMPLE_GAP_MS=20000; // Workers Paid plan: sample every 20 s, keep 300 events
+const MAX_EVENTS=1000,MAX_LEGS=3000,SAMPLES_PER_RUN=3,SAMPLE_GAP_MS=20000; // Workers Paid plan: sample every 20 s
 const TZ='America/New_York';
 
 export default {
@@ -72,6 +72,12 @@ export default {
       const j=await r.json();return new Response(JSON.stringify({ok:j.ok,error:j.error,channel:j.channel}),{headers:cors});
     }
     if(url.pathname==='/locations')return new Response(JSON.stringify(await getLocations(env)),{headers:cors});
+    if(url.pathname==='/legs')return new Response(JSON.stringify(await getLegs(env)),{headers:cors});
+    if(url.pathname==='/recap'){ // same text the Slack bot posts; ?tail=N84BL&period=today|yesterday|24h
+      await getLocations(env);const tails=await getTails(env);
+      const txt=await recapText(env,{tail:url.searchParams.get('tail')||null,period:url.searchParams.get('period')||'today'},tails);
+      return new Response(txt,{headers:{...cors,'Content-Type':'text/plain; charset=utf-8'}});
+    }
     if(url.pathname==='/tails')return new Response(JSON.stringify(await getTails(env)),{headers:cors});
     if(url.pathname==='/events')return new Response(JSON.stringify((await env.KV.get('events','json'))||[]),{headers:cors});
     if(url.pathname==='/state')return new Response(JSON.stringify((await env.KV.get('state','json'))||{}),{headers:cors});
@@ -269,7 +275,7 @@ async function handleMessage(env,ev,mentioned){
   await slackPost(env,ev.channel,reply,ev.thread_ts||ev.ts);
 }
 // Plain-language parsing: "add N84BL Robby's 407", "please remove N84BL", "where is N92N", "list", "status".
-const KEYWORDS=[[/\b(add|track|start tracking|watch|include)\b/i,'add'],[/\b(remove|delete|untrack|stop tracking|drop|exclude)\b/i,'remove'],
+const KEYWORDS=[[/\b(recap|summary|report)\b/i,'recap'],[/\b(add|track|start tracking|watch|include)\b/i,'add'],[/\b(remove|delete|untrack|stop tracking|drop|exclude)\b/i,'remove'],
   [/\b(where|find|locate|position of)\b/i,'lookup'],[/\b(list|fleet|tails|tracking)\b/i,'list'],[/\b(status|health|alive|working)\b/i,'status'],[/\b(help|commands)\b/i,'help']];
 function findTail(text){
   const m=/\b(N[1-9][0-9]{0,4}[A-Z]{0,2})\b/i.exec(text)||/\b([0-9A-F]{6})\b/i.exec(text);
@@ -294,6 +300,10 @@ function parseCommand(rawText,mentioned){
   if(!cmd)return mentioned?{cmd:'help',text}:null;
   // Without a direct mention, a bare list/status/help only counts when the message is short and clearly aimed at the bot.
   if(!mentioned&&!tail&&(cmd==='list'||cmd==='status'||cmd==='help')&&text.split(' ').length>4)return null;
+  if(cmd==='recap'){ // "recap for fleet", "recap N84BL yesterday", "recap for N84BL past 24 hours"
+    const period=/\byesterday\b/i.test(text)?'yesterday':/\b(24 ?h(ou)?rs?|past day|last day|24hrs)\b/i.test(text)?'24h':'today';
+    return{cmd,tail:tail?tail.token:null,period,label:'',text};
+  }
   if((cmd==='add'||cmd==='remove'||cmd==='lookup')&&!tail)return mentioned?{cmd:'help',text}:null;
   if(cmd==='lookup'&&!mentioned&&!/^(where|find|locate|who|what|is)\b/i.test(text)&&!/^N[1-9]/i.test(text))return null; // "where is N92N" yes; a tail mentioned mid-sentence no
   let label='';
@@ -344,11 +354,12 @@ async function runCommand(env,p){
     const state=(await env.KV.get('state','json'))||{};
     return `*Tracking ${tails.length} tails*\n`+tails.map(t=>'• '+describeTail(t,state[t.hex])).join('\n');
   }
+  if(p.cmd==='recap')return recapText(env,p,tails);
   if(p.cmd==='status'){
     const h=(await env.KV.get('health','json'))||{};
     return `Last sweep ${h.lastRun?fmtTime(h.lastRun):'never'} · ${h.ok?'feeds ok':'feeds unavailable'} · ${h.live??0} tails live · ${h.events??0} events logged · Slack posting ${h.slackOk===false?'failed':'ok'}`;
   }
-  return 'I track the BLADE fleet and post departures and arrivals here. Just tell me in plain words:\n• "add N84BL Robby\'s 407" — start tracking a tail (label optional)\n• "remove N84BL" — stop tracking\n• "where is N84BL" — one tail\'s status\n• "list" — every tail\n• "status" — tracker health';
+  return 'I track the BLADE fleet and post departures and arrivals here. Just tell me in plain words:\n• "add N84BL Robby\'s 407" — start tracking a tail (label optional)\n• "remove N84BL" — stop tracking\n• "where is N84BL" — one tail\'s status\n• "list" — every tail\n• "recap for fleet" / "recap N84BL yesterday" — flights, top route and average ETE (today, yesterday or past 24 hours)\n• "status" — tracker health';
 }
 // Channel polling: independent of Slack's event delivery. Reads new messages in the tracker channel each sweep.
 async function pollSlackChannel(env){
@@ -433,6 +444,9 @@ async function sweep(env){
   if(out.length){
     events.unshift(...out.slice().reverse());
     events.length=Math.min(events.length,MAX_EVENTS);
+    const legs=await getLegs(env);let added=false;
+    for(const e of out.filter(x=>x.type==='ARRIVED').sort((a,b)=>a.ts-b.ts)){const lg=legFor(e,events);if(lg&&!legs.find(x=>x.hex===e.hex&&x.arr===e.ts)){legs.unshift(legRecord(lg.from,lg.to));added=true;}}
+    if(added){legs.length=Math.min(legs.length,MAX_LEGS);await env.KV.put('legs',JSON.stringify(legs));}
     slackOk=await postSlack(env,out,events);
   }
   await env.KV.put('state',JSON.stringify(state));
@@ -450,6 +464,56 @@ function slackLine(e){
   const note=e.synth?' · _estimated (leg reconstructed)_':e.inferred?' · _estimated from last tracked position_':'';
   const cs=e.callsign&&e.callsign!==e.reg?' ('+e.callsign+')':'';
   return `${arrow} *${e.reg}*${cs} ${verb} *${e.locName}* — ${fmtTime(e.ts)}${alt} · ${e.dist} nm${note}`;
+}
+// ---- legs (completed flights) and recaps ----
+function buildLegs(events){ // pair each departure with the arrival that follows it, per tail
+  const byHex={};for(const e of events){(byHex[e.hex]=byHex[e.hex]||[]).push(e);}
+  const legs=[];
+  for(const hex in byHex){const list=byHex[hex].sort((a,b)=>a.ts-b.ts);
+    for(let i=1;i<list.length;i++){const d=list[i-1],a=list[i];if(d.type==='DEPARTED'&&a.type==='ARRIVED')legs.push(legRecord(d,a));}}
+  return legs.sort((a,b)=>b.arr-a.arr);
+}
+function legRecord(d,a){const A=LOCATIONS.find(l=>l.id===d.locId),B=LOCATIONS.find(l=>l.id===a.locId);
+  return{hex:a.hex,reg:a.reg,from:d.locId,fromName:d.locName,to:a.locId,toName:a.locName,dep:d.ts,arr:a.ts,ete:a.ts-d.ts,nm:(A&&B)?+haversineNm(A.lat,A.lon,B.lat,B.lon).toFixed(1):null,est:!!(d.inferred||a.inferred)};}
+async function getLegs(env){
+  let legs=await env.KV.get('legs','json');
+  if(!Array.isArray(legs)){legs=buildLegs((await env.KV.get('events','json'))||[]);await env.KV.put('legs',JSON.stringify(legs));} // one-time backfill from the event log
+  return legs;
+}
+function tzOffsetMs(ts){const m=/(\d+)\/(\d+)\/(\d+), (\d+):(\d+):(\d+)/.exec(new Date(ts).toLocaleString('en-US',{timeZone:TZ,hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+  return Date.UTC(+m[3],+m[1]-1,+m[2],+m[4]%24,+m[5],+m[6])-ts;}
+function localMidnight(ts){const off=tzOffsetMs(ts),l=new Date(ts+off);return Date.UTC(l.getUTCFullYear(),l.getUTCMonth(),l.getUTCDate())-off;}
+function fmtDay(ts){return new Date(ts).toLocaleDateString('en-US',{weekday:'short',month:'numeric',day:'numeric',timeZone:TZ});}
+function periodRange(period,now){
+  const mid=localMidnight(now);
+  if(period==='yesterday')return{start:mid-86400e3,end:mid,label:'yesterday ('+fmtDay(mid-86400e3)+')'};
+  if(period==='24h')return{start:now-86400e3,end:now,label:'past 24 hours'};
+  return{start:mid,end:now,label:'today ('+fmtDay(mid)+', since midnight)'};
+}
+// A leg whose time can't be a direct flight (slower than ~50 kt plus 12 min of ground/approach slack) had an untracked stop
+// in between. It still counts as a flight, but it is kept out of route ETE averages.
+function isIndirect(l){return l.nm!=null&&l.nm>=1&&l.ete>(l.nm/50)*3600e3+12*60e3;}
+function recapFromLegs(legs,{hex,name,period,now}){
+  const {start,end,label}=periodRange(period,now);
+  const sel=legs.filter(l=>l.arr>=start&&l.arr<end&&(!hex||l.hex===hex));
+  if(!sel.length)return `*${name} recap — ${label}*\nNo completed flights in this window.`;
+  const total=sel.length,air=sel.reduce((a,l)=>a+l.ete,0);
+  const routes={};for(const l of sel){const k=l.from+'>'+l.to;const r=routes[k]||(routes[k]={from:l.fromName,to:l.toName,n:0,d:0,ete:0});r.n++;if(!isIndirect(l)){r.d++;r.ete+=l.ete;}}
+  const avg=r=>r.d?fmtDur(r.ete/r.d):'n/a';
+  const ranked=Object.values(routes).sort((a,b)=>b.n-a.n||(a.d?a.ete/a.d:1e12)-(b.d?b.ete/b.d:1e12)),top=ranked[0];
+  const indirect=sel.filter(isIndirect).length;
+  const lines=[`*${name} recap — ${label}*`,`${total} flight${total===1?'':'s'} · ${fmtDur(air)} airborne`+(hex?'':` · ${new Set(sel.map(l=>l.hex)).size} tails flew`)];
+  lines.push(`Most flown route: *${top.from} → ${top.to}* — ${top.n} flight${top.n===1?'':'s'}, avg ETE ${avg(top)}`);
+  if(ranked.length>1)lines.push('Also: '+ranked.slice(1,4).map(r=>`${r.from} → ${r.to} ×${r.n} (avg ${avg(r)})`).join(' · '));
+  if(indirect)lines.push(`_${indirect} flight${indirect===1?'':'s'} had an untracked stop en route and ${indirect===1?'is':'are'} left out of the ETE averages_`);
+  if(!hex){const per={};for(const l of sel)per[l.reg]=(per[l.reg]||0)+1;lines.push('By tail: '+Object.entries(per).sort((a,b)=>b[1]-a[1]).map(([r,n])=>`${r} ×${n}`).join(' · '));}
+  const est=sel.filter(l=>l.est).length;if(est)lines.push(`_${est} of ${total} flights include an estimated time_`);
+  return lines.join('\n');
+}
+async function recapText(env,p,tails){
+  let hex=null,name='Fleet';
+  if(p.tail){hex=await resolveHex(p.tail);const t=hex&&tails.find(x=>x.hex===hex);if(!t)return `*${p.tail}* isn't on the tracker.`;name=tailName(t);}
+  return recapFromLegs(await getLegs(env),{hex,name,period:p.period||'today',now:Date.now()});
 }
 function fmtDur(ms){const m=Math.max(1,Math.round(ms/60000));return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')+' min';}
 // The leg an arrival completes: the tail's immediately preceding event must be a departure.
@@ -483,4 +547,4 @@ async function postSlack(env,newEvents,allEvents){
   return ok;
 }
 
-export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus};
+export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus,buildLegs,recapFromLegs,periodRange,isIndirect};
