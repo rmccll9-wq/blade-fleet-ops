@@ -18,3 +18,7 @@ binding = "KV"
 id = "b82367d937d340be8dc5233db18872f2"
 
 # Secret, set once and never committed:  wrangler secret put SLACK_WEBHOOK
+
+[[services]]
+binding = "GC"
+service = "blade-ground-connect"   # Ground Connect worker; its /sweep is kicked from this cron (secret GC_KEY)

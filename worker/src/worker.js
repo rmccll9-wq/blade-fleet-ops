@@ -53,7 +53,7 @@ const MAX_EVENTS=1000,MAX_LEGS=3000,SAMPLES_PER_RUN=3,SAMPLE_GAP_MS=20000; // Wo
 const TZ='America/New_York';
 
 export default {
-  async scheduled(event,env,ctx){ctx.waitUntil(runSweeps(env));},
+  async scheduled(event,env,ctx){ctx.waitUntil(runSweeps(env));ctx.waitUntil(kickGroundConnect(env));},
   async fetch(req,env,ctx){
     const url=new URL(req.url);
     const cors={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET','Cache-Control':'no-store','Content-Type':'application/json'};
@@ -457,13 +457,14 @@ async function sweep(env){
 
 // ---- Slack ----
 function fmtTime(ts){return new Date(ts).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:TZ});}
-function slackLine(e){
+// One line per event. Arrivals carry the origin and time en route inline (no thread) when the leg is known.
+function slackLine(e,leg){
   const arrow=e.type==='DEPARTED'?':small_red_triangle:':':large_green_circle:'; // red up-triangle = departed, green circle = arrived
   const verb=e.type==='DEPARTED'?'departed':'arrived at';
-  const alt=e.alt==null?'':e.alt===0?' · on ground':' · '+e.alt.toLocaleString()+' ft';
   const note=e.synth?' · _estimated (leg reconstructed)_':e.inferred?' · _estimated from last tracked position_':'';
   const cs=e.callsign&&e.callsign!==e.reg?' ('+e.callsign+')':'';
-  return `${arrow} *${e.reg}*${cs} ${verb} *${e.locName}* — ${fmtTime(e.ts)}${alt} · ${e.dist} nm${note}`;
+  const from=(e.type==='ARRIVED'&&leg)?` from *${leg.from.locName}* · ${fmtDur(leg.ete)} en route`+(leg.from.inferred&&!e.inferred?' _(departure time estimated)_':''):'';
+  return `${arrow} *${e.reg}*${cs} ${verb} *${e.locName}* — ${fmtTime(e.ts)}${from}${note}`;
 }
 // ---- legs (completed flights) and recaps ----
 function buildLegs(events){ // pair each departure with the arrival that follows it, per tail
@@ -540,11 +541,20 @@ async function slackSend(env,text,thread_ts){
 async function postSlack(env,newEvents,allEvents){
   let ok=true;
   for(const e of newEvents.slice().sort((a,b)=>a.ts-b.ts)){
-    const ts=await slackSend(env,slackLine(e));
-    if(ts===null){ok=false;continue;}
-    if(e.type==='ARRIVED'&&typeof ts==='string'){const leg=legFor(e,allEvents);if(leg)await slackSend(env,legLine(leg),ts);}
+    const leg=e.type==='ARRIVED'?legFor(e,allEvents):null;
+    const ts=await slackSend(env,slackLine(e,leg));
+    if(ts===null)ok=false;
   }
   return ok;
 }
 
 export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus,buildLegs,recapFromLegs,periodRange,isIndirect};
+
+// Ground Connect (blade-ground-connect): its own cron trigger never fired, so this worker's proven cron kicks its sweep twice a minute via a service binding.
+async function kickGroundConnect(env){
+  if(!env.GC||!env.GC_KEY)return;
+  for(let i=0;i<2;i++){
+    if(i)await new Promise(r=>setTimeout(r,30000));
+    try{await env.GC.fetch('https://ground-connect/sweep?key='+encodeURIComponent(env.GC_KEY));}catch(e){console.error('gc kick',e);}
+  }
+}
