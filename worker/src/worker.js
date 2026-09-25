@@ -538,11 +538,22 @@ async function slackSend(env,text,thread_ts){
   }
   return null;
 }
+// KV is eventually consistent, so a run can occasionally miss an event the previous run just recorded and re-detect it.
+// Slack itself is consistent: skip any line whose tail/action/place already appeared in the channel in the last 5 minutes.
+async function recentSlackKeys(env){
+  if(!env.SLACK_BOT_TOKEN||!env.SLACK_CHANNEL_ID)return[];
+  try{const r=await fetch('https://slack.com/api/conversations.history?'+new URLSearchParams({channel:env.SLACK_CHANNEL_ID,oldest:String((Date.now()-5*60e3)/1000),limit:'50'}),{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+    const j=await r.json();return j.ok?(j.messages||[]).map(m=>(m.text||'').split(' — ')[0]):[];}catch(e){return[];}
+}
 async function postSlack(env,newEvents,allEvents){
   let ok=true;
+  const seen=newEvents.length?await recentSlackKeys(env):[];
   for(const e of newEvents.slice().sort((a,b)=>a.ts-b.ts)){
     const leg=e.type==='ARRIVED'?legFor(e,allEvents):null;
-    const ts=await slackSend(env,slackLine(e,leg));
+    const line=slackLine(e,leg),key=line.split(' — ')[0];
+    if(seen.includes(key))continue; // already in the channel: a repeat, not a new event
+    seen.push(key);
+    const ts=await slackSend(env,line);
     if(ts===null)ok=false;
   }
   return ok;
