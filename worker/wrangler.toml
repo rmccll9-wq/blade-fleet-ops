@@ -6,6 +6,7 @@ account_id = "d1be322958802f1805183230bd6e0c28"
 
 [vars]
 SLACK_CHANNEL_ID = "C0C2YS9G7PB"   # #blade-fleet-tracker: the bot reads this channel for plain-text commands
+WX_CHANNEL_ID = "C0C4LR2L4RM"                 # flight-category channel: set after /wx/setup?channel=<name> returns its ID
 
 [observability]
 enabled = true          # Workers Logs (paid plan): persistent logs in the Cloudflare dashboard

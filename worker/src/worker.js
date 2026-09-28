@@ -78,6 +78,13 @@ export default {
       const txt=await recapText(env,{tail:url.searchParams.get('tail')||null,period:url.searchParams.get('period')||'today'},tails);
       return new Response(txt,{headers:{...cors,'Content-Type':'text/plain; charset=utf-8'}});
     }
+    if(url.pathname==='/wx')return new Response(JSON.stringify({stations:await getStations(env),state:(await env.KV.get('wx_state','json'))||null}),{headers:cors});
+    if(url.pathname==='/wx/setup'){ // one-time: post a hello into the weather channel by name and return its ID for wrangler.toml
+      const ch=url.searchParams.get('channel');if(!ch)return new Response(JSON.stringify({error:'pass ?channel=name'}),{headers:cors});
+      const r=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
+        body:JSON.stringify({channel:(ch.startsWith('#')||/^[CG][A-Z0-9]{8,}$/.test(ch))?ch:'#'+ch,text:':cloud: Flight-category watch connected. I post when a station changes between VFR, MVFR, IFR and LIFR. Say `list` for the current picture, `add KHVN` or `remove KISP` to change the stations.'})});
+      const j=await r.json();return new Response(JSON.stringify({ok:j.ok,error:j.error,channel:j.channel}),{headers:cors});
+    }
     if(url.pathname==='/tails')return new Response(JSON.stringify(await getTails(env)),{headers:cors});
     if(url.pathname==='/events')return new Response(JSON.stringify((await env.KV.get('events','json'))||[]),{headers:cors});
     if(url.pathname==='/state')return new Response(JSON.stringify((await env.KV.get('state','json'))||{}),{headers:cors});
@@ -362,10 +369,11 @@ async function runCommand(env,p){
   return 'I track the BLADE fleet and post departures and arrivals here. Just tell me in plain words:\n• "add N84BL Robby\'s 407" — start tracking a tail (label optional)\n• "remove N84BL" — stop tracking\n• "where is N84BL" — one tail\'s status\n• "list" — every tail\n• "recap for fleet" / "recap N84BL yesterday" — flights, top route and average ETE (today, yesterday or past 24 hours)\n• "status" — tracker health';
 }
 // Channel polling: independent of Slack's event delivery. Reads new messages in the tracker channel each sweep.
-async function pollSlackChannel(env){
-  if(!env.SLACK_BOT_TOKEN||!env.SLACK_CHANNEL_ID)return;
-  const cursor=await env.KV.get('slack_cursor');
-  const params=new URLSearchParams({channel:env.SLACK_CHANNEL_ID,limit:'20'});
+async function pollSlackChannel(env){return pollChannel(env,env.SLACK_CHANNEL_ID,'slack_cursor',(ev)=>handleMessage(env,ev,false));}
+async function pollChannel(env,channelId,cursorKey,handler){
+  if(!env.SLACK_BOT_TOKEN||!channelId)return;
+  const cursor=await env.KV.get(cursorKey);
+  const params=new URLSearchParams({channel:channelId,limit:'20'});
   if(cursor)params.set('oldest',cursor);
   const r=await fetch('https://slack.com/api/conversations.history?'+params,{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
   const j=await r.json();
@@ -374,17 +382,89 @@ async function pollSlackChannel(env){
   const msgs=(j.messages||[]).filter(m=>m.type==='message'&&!m.bot_id&&!m.subtype&&m.text&&m.ts!==cursor).sort((a,b)=>+a.ts-+b.ts);
   if(!cursor){ // first run: only mark the position, never replay old history
     const latest=(j.messages||[]).reduce((mx,m)=>+m.ts>+mx?m.ts:mx,'0');
-    await env.KV.put('slack_cursor',latest===  '0'?String(Date.now()/1000):latest);return;
+    await env.KV.put(cursorKey,latest===  '0'?String(Date.now()/1000):latest);return;
   }
   let last=cursor;
-  for(const m of msgs){await handleMessage(env,{...m,channel:env.SLACK_CHANNEL_ID},false);if(+m.ts>+last)last=m.ts;}
+  for(const m of msgs){await handler({...m,channel:channelId});if(+m.ts>+last)last=m.ts;}
   const newest=(j.messages||[]).reduce((mx,m)=>+m.ts>+mx?m.ts:mx,last);
-  if(newest!==cursor)await env.KV.put('slack_cursor',newest);
+  if(newest!==cursor)await env.KV.put(cursorKey,newest);
 }
 async function slackPost(env,channel,text,thread_ts){
   if(!env.SLACK_BOT_TOKEN)return;
   await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
     body:JSON.stringify({channel,text,thread_ts,unfurl_links:false})});
+}
+
+// ===== Flight-category watch (second channel). Aviation Weather Center METAR API; notifies on VFR/MVFR/IFR/LIFR changes. =====
+const WX_API='https://aviationweather.gov/api/data/metar',WX_EVERY_MS=5*60e3,WX_STALE_MS=2*3600e3;
+const DEFAULT_STATIONS=['KLGA','KEWR','KTEB','KJFK','KCDW','KMMU','KHPN','KFRG','KISP','KHWV','KFOK','KJPX','KMTP','KSWF','KPOU','KMSV','KBLM','KMJX','KACY'];
+const CAT_RANK={LIFR:0,IFR:1,MVFR:2,VFR:3},CAT_EMOJI={VFR:':large_green_circle:',MVFR:':large_blue_circle:',IFR:':red_circle:',LIFR:':large_purple_circle:'};
+async function getStations(env){let l=await env.KV.get('wx_stations','json');if(!Array.isArray(l)||!l.length){l=DEFAULT_STATIONS.slice();await env.KV.put('wx_stations',JSON.stringify(l));}return l;}
+async function fetchMetars(ids){
+  const url=WX_API+'?format=json&ids='+ids.join(',');
+  try{const r=await fetch(url,{headers:{'Accept':'application/json','User-Agent':'blade-fleet-events/1.0'},signal:AbortSignal.timeout(12000)});if(r.ok){const j=await r.json();if(Array.isArray(j))return j;}}catch(e){}
+  try{const r=await upstream(url,15000);if(r.ok){const j=await r.json();if(Array.isArray(j))return j;}}catch(e){} // via the Vercel proxy if Cloudflare egress is refused
+  return null;
+}
+function wxName(m,id){return m&&m.name?m.name.replace(/,.*$/,'').replace(/\b(Arpt|Intl|Muni|Rgnl|Cnty)\b/g,'').replace(/\s+/g,' ').trim():id;}
+function wxSummary(m){
+  const parts=[];
+  if(m.visib!=null)parts.push('vis '+String(m.visib).replace('+','')+' SM');
+  const ceil=(m.clouds||[]).filter(c=>['BKN','OVC','VV'].includes(c.cover)&&c.base!=null).map(c=>+c.base).sort((a,b)=>a-b)[0];
+  parts.push(ceil!=null?'ceiling '+ceil.toLocaleString()+' ft':'no ceiling');
+  if(m.wxString)parts.push(m.wxString);
+  return parts.join(' · ');
+}
+function latestByStation(metars){const by={};for(const m of metars){const t=Date.parse(m.reportTime||m.obsTime);if(!isNaN(t)&&(!by[m.icaoId]||t>by[m.icaoId]._t)){m._t=t;by[m.icaoId]=m;}}return by;}
+async function wxSweep(env){
+  if(!env.WX_CHANNEL_ID)return;
+  const now=Date.now(),st=(await env.KV.get('wx_state','json'))||{last:0,stations:{}};
+  if(now-(st.last||0)<WX_EVERY_MS)return;
+  const ids=await getStations(env),metars=await fetchMetars(ids);
+  if(!metars){st.last=now;st.error='api unavailable';await env.KV.put('wx_state',JSON.stringify(st));return;}
+  const by=latestByStation(metars),lines=[];
+  for(const id of ids){
+    const m=by[id],prev=st.stations[id]||{};
+    if(!m||now-m._t>WX_STALE_MS||!m.fltCat){st.stations[id]={...prev,stale:true};continue;}
+    const cat=m.fltCat;
+    if(prev.cat&&prev.cat!==cat){
+      const dir=CAT_RANK[cat]>CAT_RANK[prev.cat]?'improving':'deteriorating';
+      lines.push(`${CAT_EMOJI[cat]||''} *${id}* ${wxName(m,id)}: ${prev.cat} → *${cat}* (${dir}) · ${wxSummary(m)} · was ${prev.cat} since ${fmtTime(prev.since||prev.obs)} · obs ${fmtTime(m._t)}`);
+    }
+    st.stations[id]={cat,since:(prev.cat===cat&&prev.since)?prev.since:m._t,obs:m._t,stale:false,name:wxName(m,id),summary:wxSummary(m)};
+  }
+  st.last=now;delete st.error;await env.KV.put('wx_state',JSON.stringify(st));
+  for(const l of lines)await slackSendTo(env,env.WX_CHANNEL_ID,l);
+}
+function wxStatusText(st,ids){
+  const rows=ids.map(id=>({id,...(st.stations[id]||{})})).sort((a,b)=>(CAT_RANK[a.cat]??9)-(CAT_RANK[b.cat]??9)||a.id.localeCompare(b.id));
+  return `*Flight categories — ${ids.length} stations*\n`+rows.map(r=>r.cat?`${CAT_EMOJI[r.cat]} *${r.id}* ${r.name||''} — ${r.cat}${r.stale?' (stale)':''} since ${fmtTime(r.since)} · ${r.summary||''}`:`:white_circle: *${r.id}* — no recent report`).join('\n');
+}
+// Commands in the weather channel: "add KHVN", "remove KISP", "list" / "now", "help"
+async function wxHandleMessage(env,ev){
+  if(!ev.ts||await alreadySeen(env,ev.ts))return;
+  const text=(ev.text||'').replace(/<@[^>]+>/g,' ').replace(/\s+/g,' ').trim(),words=text.split(' ').filter(Boolean);
+  if(!words.length||words.length>6)return;
+  const c=words[0].toLowerCase(),arg=(words[1]||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const norm=id=>id.length===3?'K'+id:id;
+  let reply=null;const ids=await getStations(env);
+  if((c==='add'||c==='watch')&&arg){
+    const id=norm(arg);
+    if(ids.includes(id))reply=`*${id}* is already watched.`;
+    else{const m=await fetchMetars([id]);const latest=m&&latestByStation(m)[id];
+      if(!latest)reply=`No METAR-reporting station found for *${id}*. Use the ICAO ID (KHVN, KBDR, …).`;
+      else{ids.push(id);await env.KV.put('wx_stations',JSON.stringify(ids));
+        const st=(await env.KV.get('wx_state','json'))||{last:0,stations:{}};st.stations[id]={cat:latest.fltCat||null,since:latest._t,obs:latest._t,stale:false,name:wxName(latest,id),summary:wxSummary(latest)};await env.KV.put('wx_state',JSON.stringify(st));
+        reply=`:white_check_mark: Watching *${id}* ${wxName(latest,id)} — currently ${latest.fltCat||'unknown'} · ${wxSummary(latest)}. ${ids.length} stations.`;}}
+  }else if((c==='remove'||c==='delete'||c==='drop')&&arg){
+    const id=norm(arg),i=ids.indexOf(id);
+    if(i<0)reply=`*${id}* isn't on the list.`;else{ids.splice(i,1);await env.KV.put('wx_stations',JSON.stringify(ids));reply=`:wastebasket: Stopped watching *${id}*. ${ids.length} stations.`;}
+  }else if(c==='list'||c==='now'||c==='status'||c==='stations'||c==='current'){
+    reply=wxStatusText((await env.KV.get('wx_state','json'))||{stations:{}},ids);
+  }else if(c==='help'||c==='commands'){
+    reply='I post when a station changes flight category (VFR / MVFR / IFR / LIFR), checking every 5 minutes.\n• "add KHVN" — watch a station\n• "remove KISP" — stop watching\n• "list" — every station and its current category';
+  }
+  if(reply)await slackSendTo(env,ev.channel,reply,ev.thread_ts||ev.ts);
 }
 
 // ---- data ----
@@ -453,6 +533,8 @@ async function sweep(env){
   await env.KV.put('events',JSON.stringify(events));
   await env.KV.put('health',JSON.stringify({lastRun:now,ok:true,live:fresh.length,lastTrace,slackOk,events:events.length,slackPollError:(await env.KV.get('slack_poll_error'))||null}));
   try{await pollSlackChannel(env);}catch(e){await env.KV.put('slack_poll_error',String(e.message||e));}
+  try{await wxSweep(env);}catch(e){console.error('wx sweep',e&&e.message);}
+  try{await pollChannel(env,env.WX_CHANNEL_ID,'wx_cursor',(ev)=>wxHandleMessage(env,ev));}catch(e){console.error('wx poll',e&&e.message);}
 }
 
 // ---- Slack ----
@@ -527,13 +609,14 @@ function legFor(arr,allEvents){
 function legLine(leg){
   return `:arrow_right: Route: *${leg.from.locName}* \u2192 *${leg.to.locName}* \u00b7 ETE ${fmtDur(leg.ete)}`+(leg.nm!=null?` \u00b7 ${leg.nm.toFixed(0)} nm`:'')+(leg.estimated?' \u00b7 _times estimated_':'');
 }
-async function slackSend(env,text,thread_ts){
-  if(env.SLACK_BOT_TOKEN&&env.SLACK_CHANNEL_ID){
+async function slackSend(env,text,thread_ts){return slackSendTo(env,env.SLACK_CHANNEL_ID,text,thread_ts);}
+async function slackSendTo(env,channel,text,thread_ts){
+  if(env.SLACK_BOT_TOKEN&&channel){
     try{const r=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
-        body:JSON.stringify({channel:env.SLACK_CHANNEL_ID,text,thread_ts,unfurl_links:false})});
+        body:JSON.stringify({channel,text,thread_ts,unfurl_links:false})});
       const j=await r.json();if(j.ok)return j.ts||true;}catch(e){}
   }
-  if(!thread_ts&&env.SLACK_WEBHOOK){ // fallback: webhook (cannot thread)
+  if(!thread_ts&&env.SLACK_WEBHOOK&&channel===env.SLACK_CHANNEL_ID){ // fallback: webhook (cannot thread)
     try{const r=await fetch(env.SLACK_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,unfurl_links:false})});return r.ok?true:null;}catch(e){}
   }
   return null;
@@ -559,7 +642,7 @@ async function postSlack(env,newEvents,allEvents){
   return ok;
 }
 
-export {verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus,buildLegs,recapFromLegs,periodRange,isIndirect};
+export {wxSummary,wxName,latestByStation,wxStatusText,verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus,buildLegs,recapFromLegs,periodRange,isIndirect};
 
 // Ground Connect (blade-ground-connect): its own cron trigger never fired, so this worker's proven cron kicks its sweep twice a minute via a service binding.
 async function kickGroundConnect(env){

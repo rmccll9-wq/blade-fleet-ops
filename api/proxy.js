@@ -4,7 +4,8 @@
 const ALLOWED = [
   'https://api.adsb.lol/',
   'https://opendata.adsb.fi/',
-  'https://adsb.lol/data/traces/'   // recent trace per aircraft: last-known position for tails not currently transmitting
+  'https://adsb.lol/data/traces/',  // recent trace per aircraft: last-known position for tails not currently transmitting
+  'https://aviationweather.gov/api/' // METARs for the flight-category watch (fallback path if Cloudflare egress is refused)
 ];
 
 export default async function handler(req, res) {
