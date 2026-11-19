@@ -49,7 +49,7 @@ const TRACE_BASE='https://adsb.lol/data/traces/',TRACE_EVERY_MS=5*60e3;
 // (same one the dashboard uses). It only forwards to the allow-listed feed hosts.
 const PROXY='https://blade-fleet-ops.vercel.app/api/proxy?u=';
 function upstream(u,ms){return fetch(PROXY+encodeURIComponent(u),{headers:{'Accept':'application/json'},signal:AbortSignal.timeout(ms||10000)});}
-const MAX_EVENTS=1000,MAX_LEGS=3000,SAMPLES_PER_RUN=3,SAMPLE_GAP_MS=20000; // Workers Paid plan: sample every 20 s
+const MAX_EVENTS=1000,MAX_LEGS=3000,SAMPLES_PER_RUN=4,SAMPLE_GAP_MS=15000,SAMPLE_CUTOFF_MS=50000; // sample every 15 s (0/15/30/45 s); never start one after 50 s so a run can't overlap the next minute's
 const TZ='America/New_York';
 
 export default {
@@ -68,7 +68,7 @@ export default {
     if(url.pathname==='/slack/selftest'){ // diagnostics: try posting to a channel by name; the Slack error says if the bot is not a member
       const ch=url.searchParams.get('channel');if(!ch)return new Response(JSON.stringify({error:'pass ?channel=name'}),{headers:cors});
       const r=await fetch('https://slack.com/api/chat.postMessage',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},
-        body:JSON.stringify({channel:ch.startsWith('#')?ch:'#'+ch,text:':white_check_mark: blade_fleet_tracker can post here. Mention me with `list`, `add N12345 [label]`, `remove N12345`, or `status`.'})});
+        body:JSON.stringify({channel:ch.startsWith('#')?ch:'#'+ch,text:':white_check_mark: BLADE Ops Agent can post here. Mention me with `list`, `add N12345 [label]`, `remove N12345`, or `status`.'})});
       const j=await r.json();return new Response(JSON.stringify({ok:j.ok,error:j.error,channel:j.channel}),{headers:cors});
     }
     if(url.pathname==='/locations')return new Response(JSON.stringify(await getLocations(env)),{headers:cors});
@@ -85,6 +85,14 @@ export default {
         body:JSON.stringify({channel:(ch.startsWith('#')||/^[CG][A-Z0-9]{8,}$/.test(ch))?ch:'#'+ch,text:':cloud: Flight-category watch connected. I post when a station changes between VFR, MVFR, IFR and LIFR. Say `list` for the current picture, `add KHVN` or `remove KISP` to change the stations.'})});
       const j=await r.json();return new Response(JSON.stringify({ok:j.ok,error:j.error,channel:j.channel}),{headers:cors});
     }
+    if(url.pathname==='/slack/corrections'){ // read-only diagnostics: struck-through (corrected) posts in the fleet channel, last 48 h
+      const days=Math.min(14,+(url.searchParams.get('days')||2)),q=url.searchParams.get('q')||'^~';
+      const r=await fetch('https://slack.com/api/conversations.history?'+new URLSearchParams({channel:env.SLACK_CHANNEL_ID,oldest:String((Date.now()-days*86400e3)/1000),limit:'999'}),{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+      const j=await r.json();if(!j.ok)return new Response(JSON.stringify({error:j.error}),{headers:cors});
+      const re=new RegExp(q,'i');
+      return new Response(JSON.stringify((j.messages||[]).filter(m=>re.test(m.text||'')).map(m=>({ts:m.ts,edited:m.edited&&m.edited.ts,user:m.user,bot:!!m.bot_id,text:m.text}))),{headers:cors});
+    }
+    if(url.pathname==='/fixlog')return new Response(JSON.stringify({ttn:await env.KV.get('fix_2026-11-17_N92N_TTN'),withdrawals:await env.KV.get('fix_2026-11-05_withdrawals'),v1:await env.KV.get('fix_2026-10-30_N76ZA'),v2:await env.KV.get('fix_2026-10-30_N76ZA_v2'),v3:await env.KV.get('fix_2026-10-30_N76ZA_v3')}),{headers:cors});
     if(url.pathname==='/tails')return new Response(JSON.stringify(await getTails(env)),{headers:cors});
     if(url.pathname==='/events')return new Response(JSON.stringify((await env.KV.get('events','json'))||[]),{headers:cors});
     if(url.pathname==='/state')return new Response(JSON.stringify((await env.KV.get('state','json'))||{}),{headers:cors});
@@ -99,9 +107,14 @@ export default {
 };
 
 async function runSweeps(env){
+  const start=Date.now();
   for(let i=0;i<SAMPLES_PER_RUN;i++){
-    if(i)await new Promise(r=>setTimeout(r,SAMPLE_GAP_MS));
-    try{await sweep(env);}catch(e){console.error('sweep failed',e&&e.message);}
+    const at=start+i*SAMPLE_GAP_MS; // fixed offsets in the minute, so a slow feed call doesn't push later samples back
+    if(at-start>SAMPLE_CUTOFF_MS||Date.now()-start>SAMPLE_CUTOFF_MS)break;
+    if(Date.now()<at)await new Promise(r=>setTimeout(r,at-Date.now()));
+    const t0=Date.now();
+    try{await sweep(env,i%2===0);}catch(e){console.error('sweep failed',e&&e.message);} // Slack channels read twice a minute (samples 1 and 3)
+    console.log(`sample ${i+1} at +${Math.round((t0-start)/1000)}s took ${Math.round((Date.now()-t0)/1000)}s${i%2===0?' (with Slack read)':''}`);
   }
 }
 
@@ -143,27 +156,228 @@ function nToHex(n){ // US N-number -> ICAO hex (inverse of hexToN)
 function regOf(hex,ac,label){return (ac&&ac.r&&ac.r.trim())||hexToN(hex)||label||hex.toUpperCase();}
 
 // ---- events ----
-function detectEvents(t,ac,prev,status,alt,near,now,events,out){
-  if(!prev)return;
-  const wasDown=prev.status==='ground'||prev.status==='nosignal';
-  if(wasDown&&status==='airborne'){
-    let from=null;
-    if(nearForEvent(prev.nearest)&&lkFresh(prev,now))from=prev.nearest;
-    else if(alt!=null&&alt<=DEPART_MAX_ALT&&nearForEvent(near))from=near;
-    if(from)pushEvent(events,out,'DEPARTED',t,ac,from,now,prev.status==='nosignal',prev);
-  }else if(prev.status==='airborne'&&status==='ground'){
-    if(nearForEvent(near))pushEvent(events,out,'ARRIVED',t,ac,near,now,false,prev);
-  }else if(prev.status==='airborne'&&status==='airborne'&&alt!=null&&prev.alt!=null){
-    if(prev.alt<=EVENT_ALT&&alt>EVENT_ALT&&nearForEvent(prev.nearest))pushEvent(events,out,'DEPARTED',t,ac,prev.nearest,now,false,prev);
-    else if(prev.alt>EVENT_ALT&&alt<=EVENT_ALT&&nearForEvent(near))pushEvent(events,out,'ARRIVED',t,ac,near,now,false,prev);
+// ===== Departure / arrival rules =====
+// A departure is HELD when a tail lifts off near a location and only posted once it is confirmed:
+//   it leaves the location's event ring, OR climbs 300 ft above its on-pad reference, OR is airborne 2 min and has moved 0.3 nm.
+// If it sets down again at the same location first (a reposition / hover-taxi), or goes quiet without leaving, nothing is posted.
+// Arrivals fire only on touchdown (airborne -> ground) near a location, or when tracking is lost while low near one.
+// Heights are above the location's field elevation, from pressure altitude corrected with the local METAR altimeter setting.
+const TOUCHDOWN_CONFIRM_GS=60,DEP_CONFIRM_CLIMB_FT=300,DEP_CONFIRM_SEC=120,DEP_CONFIRM_MOVE_NM=0.3,LIFT_MEMORY_MS=15*60e3,AIRBORNE_AGL_FT=150,AIRBORNE_GS_KT=30;
+// Touchdowns: must be inside the location's own radius and still on the ground, at 60 kt or less, at a later sample (or go quiet there).
+// Going quiet in flight: it stopped only if the gap holds at least 3 minutes that the distance flown can't explain (landing, ground
+// time and takeoff take at least that). Otherwise it kept flying: same flight, and any estimated arrival is withdrawn.
+// A stop is placed only if the tail reappears low near a location.
+// An estimated arrival also needs the tail to look like it was landing: not faster than 90 kt while above 500 ft.
+// Estimated (signal-loss) arrivals: within 0.75 nm of a pad / 2.25 nm of an airport, at most 800 ft above a pad / 1,000 ft above an
+// airport (altimeter-corrected), and not faster than 90 kt while above 300 ft. Real ones measured 2026-11-05: pads <=0.41 nm and <=375 ft,
+// airports <=1.94 nm and <=525 ft (raw). Anything outside falls back to 'next seen parked' or route inference.
+const LOSS_RING_PAD_NM=0.75,LOSS_RING_APT_NM=2.25,LOSS_MAX_AGL_PAD=800,LOSS_MAX_AGL_APT=1000,LANDING_FAST_MIN_AGL=300;
+const STOP_MIN_MS=180e3,FLYTHROUGH_MIN_GS=40,FLYTHROUGH_MAX_GAP_MS=15*60e3,LANDING_MAX_GS=90,LANDING_FAST_MAX_AGL=500;
+function touchdownLoc(near){return near&&near.dist<=near.r?near:null;}
+// Where a tail that went quiet low was about to land: a location whose event ring holds its last position and which is either
+// ahead of it (within 60° of its track) or right under it (inside the location's own radius). Nearest such location wins.
+function landingCandidate(p){
+  if(p.lat==null)return null;
+  const useTrack=typeof p.track==='number'&&(p.gs||0)>=20;let best=null;
+  for(const L of LOCATIONS){
+    const d=haversineNm(p.lat,p.lon,L.lat,L.lon);if(d>(L.r<1||L.aux?LOSS_RING_PAD_NM:LOSS_RING_APT_NM))continue; // secondary airports (aux) get the tight pad limits
+    if(useTrack&&d>L.r){const diff=Math.abs(((bearingDeg(p.lat,p.lon,L.lat,L.lon)-p.track)%360+540)%360-180);if(diff>60)continue;}
+    if(!best||d<best.dist)best={id:L.id,name:L.name,r:L.r,aux:L.aux,dist:d};
   }
+  return best;
+}
+// Time in a signal gap that the distance flown can't explain (optionally routing via a location it may have stopped at).
+function unexplainedMs(prev,ac,now,via){
+  const gap=now-prev.lastSeen;if(!(prev.gs>=FLYTHROUGH_MIN_GS))return gap;
+  if(!via)return gap-haversineNm(prev.lat,prev.lon,ac.lat,ac.lon)/Math.max(prev.gs,ac.gs||0)*3600e3;
+  // each side of the gap at its own measured speed: into the location at the speed it vanished at, out of it at the speed it reappeared at
+  const vIn=Math.max(40,prev.gs),vOut=Math.max(40,ac.gs||0,prev.gs);
+  return gap-(haversineNm(prev.lat,prev.lon,via.lat,via.lon)/vIn+haversineNm(via.lat,via.lon,ac.lat,ac.lon)/vOut)*3600e3;
+}
+// An estimated arrival is withdrawn only on clear evidence the tail never stopped: under a minute unexplained AND it kept its heading.
+// Reversing course near the location (back the way it came) is what a quick drop-off looks like, so the arrival stands.
+const WITHDRAW_MAX_UNEXPLAINED_MS=60e3,REVERSAL_DEG=120;
+function passedOver(prev,ac,now,P){
+  if(prev.lat==null||!(prev.gs>=FLYTHROUGH_MIN_GS))return false;
+  const gap=now-prev.lastSeen;if(gap<=0||gap>FLYTHROUGH_MAX_GAP_MS)return false;
+  if(typeof prev.track==='number'&&typeof ac.track==='number'&&Math.abs(((ac.track-prev.track)%360+540)%360-180)>REVERSAL_DEG)return false;
+  return unexplainedMs(prev,ac,now,P)<WITHDRAW_MAX_UNEXPLAINED_MS;
+}
+// A stop nobody saw: the tail vanished in flight and reappeared having lost time we can't place. Try each location as a detour.
+// It is logged (as estimated) only when exactly one location fits: ahead of the track when it vanished (within 45°), and the
+// detour leaves 5-30 minutes of ground time at the average of its speeds before and after the gap.
+const INFER_SPARE_MIN_MS=5*60e3,INFER_SPARE_MAX_MS=30*60e3,INFER_CONE_DEG=45;
+function inferStop(prev,ac,now,exclude){
+  if(prev.lat==null)return null;
+  const gap=now-prev.lastSeen,spd=Math.max(60,((prev.gs||0)+(ac.gs||0))/2),useTrack=typeof prev.track==='number'&&(prev.gs||0)>=40;
+  const fits=[];
+  for(const L of LOCATIONS){
+    if(L.aux||(exclude&&exclude.includes(L.id)))continue; // unseen stops are only inferred at core locations
+    const d1=haversineNm(prev.lat,prev.lon,L.lat,L.lon),d2=haversineNm(L.lat,L.lon,ac.lat,ac.lon);
+    if(d1<ringNm(L)||d2<ringNm(L))continue; // it was seen near this one: not an unseen stop
+    if(useTrack){const diff=Math.abs(((bearingDeg(prev.lat,prev.lon,L.lat,L.lon)-prev.track)%360+540)%360-180);if(diff>INFER_CONE_DEG)continue;}
+    const spare=gap-(d1+d2)/spd*3600e3;
+    if(spare>=INFER_SPARE_MIN_MS&&spare<=INFER_SPARE_MAX_MS)fits.push({L,arr:prev.lastSeen+d1/spd*3600e3+60e3,dep:now-d2/spd*3600e3});
+  }
+  return fits.length===1?fits[0]:null;
+}
+function flewThrough(prev,ac,now,via){
+  if(prev.lat==null||!(prev.gs>=FLYTHROUGH_MIN_GS))return false;
+  const gap=now-prev.lastSeen;if(gap<=0||gap>FLYTHROUGH_MAX_GAP_MS)return false;
+  return unexplainedMs(prev,ac,now,via||null)<STOP_MIN_MS;
+}
+const ELEV_FALLBACK={"JRB": 7, "E34": 10, "W30": 7, "65NJ": 11, "TEB": 9, "HPN": 439, "JFK": 13, "EWR": 18, "LGA": 21, "BED": 133, "FRG": 82, "HTO": 55, "MTP": 6, "SWF": 491, "ACY": 75, "PVD": 55, "BOS": 20, "PHL": 36, "IAD": 312, "MIA": 8, "PBI": 19, "HYA": 54, "ACK": 47, "MVY": 67, "LWM": 148, "N12": 43, "6NJ6": 20, "BLM": 153, "JY79": 133, "FOK": 67, "HWV": 81, "ISP": 99, "HVN": 12, "BDR": 9, "MMU": 187, "MSV": 1403, "29NY": 473, "W00": 168, "39N": 128, "CDW": 173, "LDJ": 23}; // field elevations (ft) from OurAirports, used until locations.json carries "elev"
+function locById(id){return LOCATIONS.find(x=>x.id===id)||null;}
+function elevOf(id){const L=locById(id);return L&&typeof L.elev==='number'?L.elev:(ELEV_FALLBACK[id]??0);}
+function ringNm(s){return s.r+(s.r<1?0.5:1.0);}
+// Altimeter setting (inHg) from the flight-category watch's METARs: nearest station within 60 nm, else the regional median.
+function qnhFor(lat,lon,wx,now){
+  const st=Object.values((wx&&wx.stations)||{}).filter(x=>typeof x.altim==='number'&&x.lat!=null&&now-(x.obs||0)<12*3600e3);
+  if(!st.length||lat==null)return null;
+  let best=null,bd=Infinity;for(const x of st){const d=haversineNm(lat,lon,x.lat,x.lon);if(d<bd){bd=d;best=x;}}
+  if(bd<=60)return best.altim;
+  const v=st.map(x=>x.altim).sort((a,b)=>a-b);return v[Math.floor(v.length/2)];
+}
+function indAlt(ac,qnh){if(ac.alt_baro==='ground')return'ground';if(typeof ac.alt_baro!=='number')return null;return ac.alt_baro+(qnh?(qnh-29.92)*1000:0);} // ft MSL
+function aglAt(ind,locId){if(ind==='ground')return 0;if(ind==null)return null;return Math.round(ind-elevOf(locId));}
+// Airborne vs on ground for detection. Transponder ground flag wins; otherwise over 30 kt, or more than 150 ft above the
+// nearby location (150 ft clears the ±125 ft encoder tolerance, so a hover-taxi stays "on ground"). Away from locations, or with no
+// altimeter setting available, falls back to the raw rule (pressure altitude above 0 ft).
+function flightStatus(ac,near,ind,qnh){
+  // an "on ground" flag above 40 kt anywhere but on a location's own surface is a bad reading: a helicopter can't be doing that
+  if(ac.alt_baro==='ground')return (ac.gs||0)>40&&!touchdownLoc(near)?'airborne':'ground';
+  if((ac.gs||0)>AIRBORNE_GS_KT)return'airborne';
+  if(typeof ind!=='number')return'ground';
+  if(qnh&&near&&nearForEvent(near))return ind-elevOf(near.id)>AIRBORNE_AGL_FT?'airborne':'ground';
+  if(near&&nearForEvent(near))return'ground'; // near a location with no altimeter setting: raw altitude can be 600+ ft off, so go by speed alone (30 kt or less = on ground)
+  return ac.alt_baro>0?'airborne':'ground';
+}
+function confirmDep(pend,ac,ind,now){
+  const L=locById(pend.loc.id),off=L?haversineNm(ac.lat,ac.lon,L.lat,L.lon):Infinity;
+  if(off>ringNm(pend.loc))return'left the location';
+  if(typeof ind==='number'&&typeof pend.refInd==='number'&&ind-pend.refInd>=DEP_CONFIRM_CLIMB_FT)return'climbed 300 ft';
+  if(now-pend.ts>=DEP_CONFIRM_SEC*1000&&haversineNm(ac.lat,ac.lon,pend.lat,pend.lon)>=DEP_CONFIRM_MOVE_NM)return'airborne 2 min and moving';
+  return null;
+}
+// Returns the holds to carry forward: {dep, arr}.
+function detectEvents(t,ac,prev,status,ind,near,now,events,out,qnh){
+  const none={dep:null,arr:null};
+  if(!prev)return none;
+  // A touchdown seen on the last sample is real only if the tail is still on the ground now; airborne again means one bad
+  // "on ground" reading in flight, or a touch-and-go. Either way: no arrival, and no departure either.
+  if(prev.arrPend){
+    if(status==='ground'&&(ac.gs||0)<=TOUCHDOWN_CONFIRM_GS){
+      const ap=prev.arrPend;
+      if(ap.replaces)(out.retract=out.retract||[]).push({hex:t.hex,ts:ap.replaces.ts,locId:ap.replaces.locId,why:'it landed at '+ap.loc.name+' instead'});
+      pushEvent(ap.replaces?events.filter(e=>!(e.hex===t.hex&&e.type==='ARRIVED'&&e.ts===ap.replaces.ts)):events,out,'ARRIVED',t,ac,ap.loc,ap.ts,!!ap.inferred,prev);return none;}
+    if(status==='ground')return{dep:null,arr:prev.arrPend}; // still rolling fast: wait for it to slow before calling it a landing
+    return none;
+  }
+  if(prev.status==='nosignal'&&status==='ground'&&(prev.lostAirborne||prev.lossArr)){
+    const td=touchdownLoc(near);
+    // Held like any touchdown: it must still be on the ground, slowed to 60 kt or less, at the next sample.
+    if(td&&prev.lossArr&&prev.lossArr.locId!==td.id) // the estimated arrival named the wrong place: move it to where the tail actually is
+      return{dep:null,arr:{loc:td,ts:prev.lossArr.ts,gs:ac.gs||0,inferred:true,replaces:{ts:prev.lossArr.ts,locId:prev.lossArr.locId}}};
+    if(td&&prev.lostAirborne){ // went quiet in flight, next seen on the ground here: it landed here. Time it by dead reckoning.
+      let ts=now;if(prev.lat!=null&&prev.gs>=FLYTHROUGH_MIN_GS)ts=Math.min(now,prev.lastSeen+haversineNm(prev.lat,prev.lon,ac.lat,ac.lon)/prev.gs*3600e3+30e3);
+      return{dep:null,arr:{loc:td,ts,gs:ac.gs||0,inferred:true}};
+    }
+    return none;
+  }
+  if(prev.status==='nosignal'&&status==='airborne'&&(prev.lostAirborne||prev.lossArr)){
+    const lossLoc=prev.lossArr?locById(prev.lossArr.locId):null;
+    if(lossLoc?passedOver(prev,ac,now,lossLoc):flewThrough(prev,ac,now)){ // it kept flying the whole time: same flight
+      if(prev.lossArr)(out.retract=out.retract||[]).push({hex:t.hex,ts:prev.lossArr.ts,locId:prev.lossArr.locId,why:'it flew past without landing'});
+      return none;
+    }
+    // it lost time somewhere. Which location could it have stopped at: where an arrival was estimated, or the one it's low near now?
+    const a=near?aglAt(ind,near.id):null;
+    const P=prev.lossArr?locById(prev.lossArr.locId):(nearForEvent(near)&&a!=null&&a<=DEPART_MAX_ALT?locById(near.id):null);
+    if(!P){ // stopped somewhere it wasn't seen. If the route points to exactly one location, log that stop as estimated.
+      const g=prev.lostAirborne?inferStop(prev,ac,now,near&&nearForEvent(near)?[near.id]:null):null;
+      if(g){const loc={id:g.L.id,name:g.L.name,r:g.L.r,dist:0};
+        pushEvent(events,out,'ARRIVED',t,prev,loc,Math.round(g.arr),true,prev);
+        const k=out.length;pushEvent([...events,...out],out,'DEPARTED',t,ac,loc,Math.round(Math.max(g.dep,g.arr+60e3)),true,prev);
+        for(const e of out.slice(k-1))if(e.locId===loc.id)e.route=true;}
+      return none;
+    }
+    if(!prev.lossArr&&flewThrough(prev,ac,now,P)){ // routing over P accounts for the time: it passed over P without stopping
+      if(prev.lossArr)(out.retract=out.retract||[]).push({hex:t.hex,ts:prev.lossArr.ts,locId:prev.lossArr.locId,why:'it flew past without landing'});
+      return none;
+    }
+  }
+  let pend=prev.depPend||null;
+  if(pend){
+    if(status==='airborne'){
+      if(confirmDep(pend,ac,ind,now)){pushEvent(events,out,'DEPARTED',t,ac,pend.loc,pend.ts,pend.inferred,prev);return none;}
+      if(now-pend.ts>=DEP_CONFIRM_SEC*1000)pend={...pend,ts:now}; // still hovering in place: restart the clock
+      return{dep:pend,arr:null};
+    }
+    if(status==='ground'){
+      if(near&&near.id===pend.loc.id&&touchdownLoc(near))return none; // set down again on the same location: repositioning, not a flight
+      pushEvent(events,out,'DEPARTED',t,ac,pend.loc,pend.ts,pend.inferred,prev); // touched down somewhere else: the departure was real
+      const td=touchdownLoc(near);return{dep:null,arr:td?{loc:td,ts:now,gs:ac.gs||0}:null};
+    }
+  }
+  if((prev.status==='ground'||prev.status==='nosignal')&&status==='airborne'){
+    let from=null;
+    if(prev.status==='ground'){if(touchdownLoc(prev.nearest))from=prev.nearest;}            // was on the ground AT a location
+    else if(prev.lostAirborne)from=nearForEvent(near)?near:null;                              // stopped out of coverage, now low near one: it stopped there
+    else if(prev.lossArr)from=locById(prev.lossArr.locId)?{...snapNear({loc:locById(prev.lossArr.locId),dist:0}),dist:0}:null; // departing where it was estimated to land
+    else if(nearForEvent(prev.nearest)&&lkFresh(prev,now))from=prev.nearest;                  // went quiet at a location
+    if(!from&&prev.status==='nosignal'){const a=near?aglAt(ind,near.id):null;if(a!=null&&a<=DEPART_MAX_ALT&&nearForEvent(near))from=near;}
+    if(!from)return none;
+    // On-pad reference altitude: the tail's own last reading on the ground there (cancels encoder error), else field elevation if QNH is known.
+    const refInd=(prev.status==='ground'&&typeof prev.ind==='number'&&prev.nearest&&prev.nearest.id===from.id)?prev.ind:(qnh?elevOf(from.id):null);
+    const lift=prev.lastLift&&prev.lastLift.locId===from.id&&now-prev.lastLift.ts<LIFT_MEMORY_MS?prev.lastLift:null;
+    pend={loc:from,ts:lift?lift.ts:now,lat:ac.lat,lon:ac.lon,refInd,inferred:prev.status==='nosignal'&&!lift};
+    if(confirmDep(pend,ac,ind,now)){pushEvent(events,out,'DEPARTED',t,ac,pend.loc,pend.ts,pend.inferred,prev);return none;}
+    return{dep:pend,arr:null};
+  }
+  if(prev.status==='airborne'&&status==='ground'){const td=touchdownLoc(near);if(td)return{dep:null,arr:{loc:td,ts:now,gs:ac.gs||0}};}
+  return none;
 }
 function handleLost(t,prev,now,events,out){
   if(!prev||prev.status==='nosignal')return;
   if(now-prev.lastSeen<LOST_SEC*1000)return;
-  if(prev.status==='airborne'&&prev.alt!=null&&prev.alt<=ARRIVE_MAX_ALT&&nearForEvent(prev.nearest))
-    pushEvent(events,out,'ARRIVED',t,prev,prev.nearest,now,true,prev);
+  const arr=prev.arrPend;prev.arrPend=null;
+  if(arr&&(arr.gs||0)>TOUCHDOWN_CONFIRM_GS){prev.lostAirborne=true;prev.status='nosignal';prev.ts=now;return;} // that "touchdown" was a fast bad reading: treat as lost in flight
+  if(arr){ // touched down, then went quiet: landed
+    if(arr.replaces)(out.retract=out.retract||[]).push({hex:t.hex,ts:arr.replaces.ts,locId:arr.replaces.locId,why:'it landed at '+arr.loc.name+' instead'});
+    pushEvent(arr.replaces?events.filter(e=>!(e.hex===t.hex&&e.type==='ARRIVED'&&e.ts===arr.replaces.ts)):events,out,'ARRIVED',t,prev,arr.loc,arr.ts,!!arr.inferred,prev);prev.status='nosignal';prev.ts=now;return;}
+  const pend=prev.depPend;prev.depPend=null;
+  if(pend){
+    // went quiet without leaving the location it lifted from: no flight yet. Remember the liftoff in case it reappears en route.
+    if(prev.nearest&&prev.nearest.id===pend.loc.id&&nearForEvent(prev.nearest)){prev.lastLift={locId:pend.loc.id,ts:pend.ts};prev.status='nosignal';prev.ts=now;return;}
+    pushEvent(events,out,'DEPARTED',t,prev,pend.loc,pend.ts,pend.inferred,prev);
+  }
+  const cand=prev.status==='airborne'?landingCandidate(prev):null;
+  const a=cand?(typeof prev.ind==='number'?aglAt(prev.ind,cand.id):(typeof prev.agl==='number'?prev.agl:prev.alt)):null;
+  const looksLikeLanding=!((prev.gs||0)>LANDING_MAX_GS&&a!=null&&a>LANDING_FAST_MIN_AGL);
+  const ceiling=cand?(cand.r<1||cand.aux?LOSS_MAX_AGL_PAD:LOSS_MAX_AGL_APT):0;
+  if(cand&&a!=null&&a<=ceiling&&looksLikeLanding){
+    pushEvent(events,out,'ARRIVED',t,prev,cand,now,true,prev);
+    prev.lossArr={ts:now,locId:cand.id}; // kept so the arrival can be withdrawn or moved if the tail turns out otherwise
+  }else if(prev.status==='airborne')prev.lostAirborne=true;
   prev.status='nosignal';prev.ts=now;
+}
+// One sample for one tail: classify, detect, and return the tail's new state.
+function stepTail(t,ac,prev,now,events,out,wx){
+  const status=ac?getStatus(ac):'stale';
+  if(!ac||status==='stale'){handleLost(t,prev,now,events,out);return prev;}
+  const near=snapNear(nearestLoc(ac.lat,ac.lon)),qnh=qnhFor(ac.lat,ac.lon,wx,now),ind=indAlt(ac,qnh),agl=near?aglAt(ind,near.id):null;
+  const fs=flightStatus(ac,near,ind,qnh);
+  const res=detectEvents(t,ac,prev,fs,ind,near,now,events,out,qnh),pend=res.dep;
+  // Dwell tracking: which location the tail is (or was last) near, since when, and until when. Used to time reconstructed events.
+  const nearEv=nearForEvent(near)?near:null,pn=prev||{};
+  const dwell=nearEv?{nearLoc:nearEv,nearSince:(pn.nearLoc&&pn.nearLoc.id===nearEv.id&&pn.nearSince)?pn.nearSince:now,nearLast:now}
+                    :{nearLoc:pn.nearLoc||null,nearSince:pn.nearSince||null,nearLast:pn.nearLast||null};
+  // a remembered liftoff is used once, when the tail next shows up airborne; touching down anywhere clears it
+  let lastLift=pn.lastLift&&now-pn.lastLift.ts<LIFT_MEMORY_MS?pn.lastLift:null;
+  if(fs==='ground'||pend||(pn.status==='nosignal'&&fs==='airborne'))lastLift=null;
+  return{...dwell,status:fs,alt:altOf(ac),ind,agl,gs:typeof ac.gs==='number'?ac.gs:null,depPend:pend,arrPend:res.arr,lastLift,alt_baro:ac.alt_baro,lat:ac.lat,lon:ac.lon,nearest:near,
+    lastSeen:now-Math.round((ac.seen_pos!=null?ac.seen_pos:(ac.seen||0))*1000),ts:now,track:typeof ac.track==='number'?ac.track:null,
+    r:ac.r||(prev&&prev.r)||'',t:ac.t||(prev&&prev.t)||'',desc:ac.desc||(prev&&prev.desc)||'',flight:(ac.flight||'').trim()};
 }
 function makeEvent(type,t,ac,loc,ts,inferred,synth){
   return{type,hex:t.hex,reg:regOf(t.hex,ac,t.label),label:t.label||'',locName:loc.name,locId:loc.id,dist:+(loc.dist||0).toFixed(2),
@@ -175,7 +389,15 @@ function makeEvent(type,t,ac,loc,ts,inferred,synth){
 function pushEvent(events,out,type,t,ac,loc,now,inferred,prev){
   const mine=[...out,...events].filter(e=>e.hex===t.hex).sort((a,b)=>b.ts-a.ts),last=mine[0];
   if(last&&last.type===type&&last.locId===loc.id)return; // same event at the same place again: a repeat, not a new leg
-  if([...out,...events].find(e=>e.hex===t.hex&&e.type===type&&now-(e.ts||0)<EVENT_GAP_SEC*1000))return;
+  if([...out,...events].find(e=>e.hex===t.hex&&e.type===type&&e.locId===loc.id&&Math.abs(now-(e.ts||0))<EVENT_GAP_SEC*1000))return; // a repeat is the same event at the same place
+  if(last&&last.type==='ARRIVED'&&type==='DEPARTED'&&last.locId!==loc.id){
+    // a whole flight went unseen: it left the last place it arrived at and landed here. Rebuild both ends (estimated).
+    const dwell=prev||{},X=locById(last.locId),Y=locById(loc.id),fly=(X&&Y)?haversineNm(X.lat,X.lon,Y.lat,Y.lon)/110*3600e3+60e3:10*60e3;
+    const arrTs=Math.min(now-1000,(dwell.nearLoc&&dwell.nearLoc.id===loc.id&&dwell.nearSince>last.ts)?dwell.nearSince:Math.max(last.ts+fly+60e3,now-60e3));
+    const depTs=Math.max(last.ts+60e3,arrTs-fly);
+    out.push(makeEvent('DEPARTED',t,ac,{id:last.locId,name:last.locName,dist:last.dist},Math.min(depTs,arrTs-1000),true,true));
+    out.push(makeEvent('ARRIVED',t,ac,loc,arrTs,true,true));
+  }
   if(last&&last.type===type){
     const dwell=prev||{};
     if(type==='ARRIVED'){ // it must have left the previous location: use the last moment it was seen near there
@@ -196,7 +418,7 @@ async function getLocations(env){
   try{
     const r=await fetch(LOCATIONS_URL+'?ts='+now,{signal:AbortSignal.timeout(8000)});
     if(r.ok){const list=await r.json();
-      const clean=(Array.isArray(list)?list:[]).filter(l=>l&&l.id&&typeof l.lat==='number'&&typeof l.lon==='number').map(l=>({id:l.id,name:l.name||l.id,lat:l.lat,lon:l.lon,r:l.r||2.0}));
+      const clean=(Array.isArray(list)?list:[]).filter(l=>l&&l.id&&typeof l.lat==='number'&&typeof l.lon==='number').map(l=>({id:l.id,name:l.name||l.id,lat:l.lat,lon:l.lon,r:l.r||2.0,elev:typeof l.elev==='number'?l.elev:undefined,aux:l.aux===true||undefined}));
       if(clean.length){LOCATIONS=clean;await env.KV.put('locations',JSON.stringify({list:clean,fetchedAt:now,source:'locations.json'}));return LOCATIONS;}}
   }catch(e){}
   if(cached&&cached.list&&cached.list.length){LOCATIONS=cached.list;await env.KV.put('locations',JSON.stringify({...cached,fetchedAt:now}));} // keep the last good copy, retry later
@@ -290,6 +512,18 @@ function findTail(text){
 }
 function countTails(text){return new Set([...text.matchAll(/\b(N[1-9][0-9]{0,4}[A-Z]{0,2})\b/gi)].map(m=>m[1].toUpperCase())).size;}
 const LABEL_MAX=40;
+// Several tails at once: the message must START with add/remove and contain nothing but tails (commas, "and", "from the tracker" allowed).
+// "remove N62ZA, N76ZA and N88ZA" works; a sentence that merely mentions several tails still doesn't.
+const MULTI_TAIL_MAX=25;
+function parseMulti(text){
+  const m=/^(?:please\s+)?(add|track|remove|delete|untrack|drop)\b[\s:,-]*(.*)$/i.exec(text);if(!m)return null;
+  const rest=m[2].replace(/\b(?:(?:from|to|on|off)\s+(?:the\s+)?(?:tracker|fleet|list))\b/gi,' ').replace(/\b(and|please|thanks|thank you|pls)\b/gi,' ')
+    .replace(/[,;.&!+\/]+/g,' ').trim().split(/\s+/).filter(Boolean);
+  if(rest.length<2||rest.length>MULTI_TAIL_MAX)return null;
+  if(!rest.every(w=>/^N[1-9][0-9]{0,4}[A-Z]{0,2}$/i.test(w)||/^(?=.*\d)[0-9A-F]{6}$/i.test(w)))return null;
+  const tails=[...new Set(rest.map(w=>w.toUpperCase()))];if(tails.length<2)return null;
+  return{cmd:/^(add|track)$/i.test(m[1])?'add':'remove',tail:tails[0],tails,label:'',text};
+}
 function parseCommand(rawText,mentioned){
   const text=(rawText||'').replace(/<@[^>]+>/g,' ').replace(/[‘’]/g,"'").replace(/\s+/g,' ').trim();
   const tail=findTail(text);
@@ -299,6 +533,7 @@ function parseCommand(rawText,mentioned){
   //  - a message naming several different tails is ambiguous
   //  - a plain (un-mentioned) request must be short and start with the command word
   if(/["'`\u201c]\s*(add|remove|track|untrack|delete|where|list|status)\b/i.test(text)||/[\u2022]/.test(text))return null;
+  const multi=parseMulti(text);if(multi)return multi;
   if(countTails(text)>1&&!mentioned)return null;
   if(!mentioned&&(words.length>12||!KEYWORDS.some(([re])=>re.test(words.slice(0,3).join(' ')))))return null;
   let cmd=null;for(const [re,name] of KEYWORDS){if(re.test(text)){cmd=name;break;}}
@@ -325,11 +560,12 @@ function parseCommand(rawText,mentioned){
 }
 function tailName(t){return hexToN(t.hex)||t.hex.toUpperCase();}
 function describeTail(t,s){
-  const st=!s?'no data yet':s.status==='airborne'?'airborne'+(s.alt!=null?' at '+Math.round(s.alt).toLocaleString()+' ft':''):s.status==='ground'?'on the ground':'not transmitting · last tracked '+fmtTime(s.lastSeen);
+  const shownAlt=typeof s?.ind==='number'?s.ind:s?.alt; // altimeter-corrected altitude (ft MSL) when known, not raw pressure altitude
+  const st=!s?'no data yet':s.status==='airborne'?'airborne'+(shownAlt!=null?' at '+(Math.round(shownAlt/50)*50).toLocaleString()+' ft':''):s.status==='ground'?'on the ground':'not transmitting · last tracked '+fmtTime(s.lastSeen);
   let where='';
   if(s&&s.lat!=null){
     const n=s.nearest;
-    if(n&&n.dist<=n.r)where=` · at ${n.name}`;
+    if(n&&n.dist<=n.r)where=` · ${s.status==='airborne'?'over':'at'} ${n.name}`;
     else{const d=describePos(s.lat,s.lon,s.track,s.status==='airborne');
       where=` · ${d.where}`+(d.hdg?`, heading ${d.hdg}`:'')+(d.inArea&&d.station?` · ${d.station.dist.toFixed(0)} nm from ${d.station.loc.id}`:'');}
   }
@@ -337,6 +573,22 @@ function describeTail(t,s){
 }
 async function runCommand(env,p){
   const tails=await getTails(env);await getLocations(env);await getWaypoints(env);
+  if(p.tails&&(p.cmd==='add'||p.cmd==='remove')){ // several tails in one message: one KV write, one summary reply
+    const done=[],already=[],bad=[];
+    for(const tok of p.tails){
+      const hex=await resolveHex(tok);if(!hex){bad.push(tok);continue;}
+      const i=tails.findIndex(t=>t.hex===hex);
+      if(p.cmd==='add'){if(i>=0){already.push(tailName(tails[i]));continue;}tails.push({hex,label:''});done.push(hexToN(hex)||hex.toUpperCase());}
+      else{if(i<0){already.push(tok);continue;}const [t]=tails.splice(i,1);done.push(tailName(t));}
+    }
+    if(done.length)await env.KV.put('tails',JSON.stringify(tails));
+    const b=x=>x.map(n=>`*${n}*`).join(', '),out=[];
+    if(done.length)out.push(p.cmd==='add'?`:white_check_mark: Added ${b(done)}. They show on the dashboard within a minute.`:`:wastebasket: Removed ${b(done)}.`);
+    if(already.length)out.push(p.cmd==='add'?`Already on the tracker: ${b(already)}.`:`Not on the tracker: ${b(already)}.`);
+    if(bad.length)out.push(`Couldn't match ${b(bad)} to an aircraft (use N-numbers like N84BL or 6-character ICAO hex).`);
+    out.push(`Now tracking ${tails.length} tails.`);
+    return out.join('\n');
+  }
   if(p.cmd==='add'){
     const hex=await resolveHex(p.tail);
     if(!hex)return `I couldn't match *${p.tail}* to an aircraft. Use a US N-number like N84BL or a 6-character ICAO hex.`;
@@ -369,6 +621,7 @@ async function runCommand(env,p){
   return 'I track the BLADE fleet and post departures and arrivals here. Just tell me in plain words:\n• "add N84BL Robby\'s 407" — start tracking a tail (label optional)\n• "remove N84BL" — stop tracking\n• "where is N84BL" — one tail\'s status\n• "list" — every tail\n• "recap for fleet" / "recap N84BL yesterday" — flights, top route and average ETE (today, yesterday or past 24 hours)\n• "status" — tracker health';
 }
 // Channel polling: independent of Slack's event delivery. Reads new messages in the tracker channel each sweep.
+async function slackBackingOff(env){const u=+(await env.KV.get('slack_backoff_until')||0);return Date.now()<u;}
 async function pollSlackChannel(env){return pollChannel(env,env.SLACK_CHANNEL_ID,'slack_cursor',(ev)=>handleMessage(env,ev,false));}
 async function pollChannel(env,channelId,cursorKey,handler){
   if(!env.SLACK_BOT_TOKEN||!channelId)return;
@@ -377,7 +630,7 @@ async function pollChannel(env,channelId,cursorKey,handler){
   if(cursor)params.set('oldest',cursor);
   const r=await fetch('https://slack.com/api/conversations.history?'+params,{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
   const j=await r.json();
-  if(!j.ok){await env.KV.put('slack_poll_error',j.error||'unknown');return;}
+  if(!j.ok){await env.KV.put('slack_poll_error',j.error||'unknown');if(j.error==='ratelimited')await env.KV.put('slack_backoff_until',String(Date.now()+1000*Math.max(30,+(r.headers.get('retry-after')||30))));return;}
   await env.KV.delete('slack_poll_error');
   const msgs=(j.messages||[]).filter(m=>m.type==='message'&&!m.bot_id&&!m.subtype&&m.text&&m.ts!==cursor).sort((a,b)=>+a.ts-+b.ts);
   if(!cursor){ // first run: only mark the position, never replay old history
@@ -425,16 +678,27 @@ async function wxSweep(env){
   const by=latestByStation(metars),lines=[];
   for(const id of ids){
     const m=by[id],prev=st.stations[id]||{};
-    if(!m||now-m._t>WX_STALE_MS||!m.fltCat){st.stations[id]={...prev,stale:true};continue;}
+    if(!m||now-m._t>WX_STALE_MS||!m.fltCat){st.stations[id]={...prev,stale:true,...(m&&typeof m.altim==='number'&&now-m._t<=WX_STALE_MS?{altim:+(m.altim*0.02953).toFixed(2),lat:m.lat,lon:m.lon,obs:m._t}:{})};continue;}
     const cat=m.fltCat;
     if(prev.cat&&prev.cat!==cat){
       const dir=CAT_RANK[cat]>CAT_RANK[prev.cat]?'improving':'deteriorating';
-      lines.push(`${CAT_EMOJI[cat]||''} *${id}* ${wxName(m,id)}: ${prev.cat} → *${cat}* (${dir}) · ${wxSummary(m)} · was ${prev.cat} since ${fmtTime(prev.since||prev.obs)} · obs ${fmtTime(m._t)}`);
+      lines.push(wxChangeLine(id,m,prev,cat,dir));
     }
-    st.stations[id]={cat,since:(prev.cat===cat&&prev.since)?prev.since:m._t,obs:m._t,stale:false,name:wxName(m,id),summary:wxSummary(m)};
+    st.stations[id]={cat,since:(prev.cat===cat&&prev.since)?prev.since:m._t,obs:m._t,stale:false,name:wxName(m,id),summary:wxSummary(m),altim:typeof m.altim==='number'?+(m.altim*0.02953).toFixed(2):null,lat:m.lat,lon:m.lon};
   }
   st.last=now;delete st.error;await env.KV.put('wx_state',JSON.stringify(st));
   for(const l of lines)await slackSendTo(env,env.WX_CHANNEL_ID,l);
+}
+// House rules: station-specific wording when a station deteriorates (and only then). `mention` is a Slack user ID.
+const WX_HOUSE_RULES={
+  KMPO:{down:'WE HAVE LOST MOUNT POCONO'},
+  KACK:{down:'What a horrible place to be'},
+};
+function wxChangeLine(id,m,prev,cat,dir){
+  const detail=`${prev.cat} → *${cat}* (${dir}) · ${wxSummary(m)} · was ${prev.cat} since ${fmtTime(prev.since||prev.obs)} · obs ${fmtTime(m._t)}`;
+  const rule=WX_HOUSE_RULES[id];
+  if(rule&&dir==='deteriorating')return `:rotating_light: *${rule.down}*${rule.mention?' <@'+rule.mention+'>':''} — *${id}* ${wxName(m,id)}: ${detail}`;
+  return `${CAT_EMOJI[cat]||''} *${id}* ${wxName(m,id)}: ${detail}`;
 }
 function wxStatusText(st,ids){
   const rows=ids.map(id=>({id,...(st.stations[id]||{})})).sort((a,b)=>(CAT_RANK[a.cat]??9)-(CAT_RANK[b.cat]??9)||a.id.localeCompare(b.id));
@@ -454,7 +718,7 @@ async function wxHandleMessage(env,ev){
     else{const m=await fetchMetars([id]);const latest=m&&latestByStation(m)[id];
       if(!latest)reply=`No METAR-reporting station found for *${id}*. Use the ICAO ID (KHVN, KBDR, …).`;
       else{ids.push(id);await env.KV.put('wx_stations',JSON.stringify(ids));
-        const st=(await env.KV.get('wx_state','json'))||{last:0,stations:{}};st.stations[id]={cat:latest.fltCat||null,since:latest._t,obs:latest._t,stale:false,name:wxName(latest,id),summary:wxSummary(latest)};await env.KV.put('wx_state',JSON.stringify(st));
+        const st=(await env.KV.get('wx_state','json'))||{last:0,stations:{}};st.stations[id]={cat:latest.fltCat||null,since:latest._t,obs:latest._t,stale:false,name:wxName(latest,id),summary:wxSummary(latest),altim:typeof latest.altim==='number'?+(latest.altim*0.02953).toFixed(2):null,lat:latest.lat,lon:latest.lon};await env.KV.put('wx_state',JSON.stringify(st));
         reply=`:white_check_mark: Watching *${id}* ${wxName(latest,id)} — currently ${latest.fltCat||'unknown'} · ${wxSummary(latest)}. ${ids.length} stations.`;}}
   }else if((c==='remove'||c==='delete'||c==='drop')&&arg){
     const id=norm(arg),i=ids.indexOf(id);
@@ -467,6 +731,130 @@ async function wxHandleMessage(env,ev){
   if(reply)await slackSendTo(env,ev.channel,reply,ev.thread_ts||ev.ts);
 }
 
+// ---- one-time record corrections (each runs once, guarded by a KV flag) ----
+async function oneTimeFixes(env,events){
+  await oneTimeFix5(env,events);
+  await oneTimeFix4(env,events);
+  await oneTimeFix2(env,events);
+  await oneTimeFix3(env);
+  const FLAG='fix_2026-10-30_N76ZA';
+  if(await env.KV.get(FLAG))return;
+  const hex='aa416f',find=(type,loc,ts)=>events.find(e=>e.hex===hex&&e.type===type&&e.locId===loc&&e.ts===ts);
+  const lgaA=find('ARRIVED','LGA',1793389760421),lgaD=find('DEPARTED','LGA',1793389784419),fokA=find('ARRIVED','FOK',1793377003255),fokD=find('DEPARTED','FOK',1793377063255);
+  const bdrD=find('DEPARTED','BDR',1793388702968),w30D=find('DEPARTED','W30',1793372893834),htoA=find('ARRIVED','HTO',1793377640555);
+  for(const e of [lgaA,lgaD,fokA,fokD]){if(e)events.splice(events.indexOf(e),1);}
+  let e34=events.find(e=>e.hex===hex&&e.type==='ARRIVED'&&e.locId==='E34'&&Math.abs(e.ts-1793389820910)<15*60e3);
+  if(!e34&&bdrD){const L=locById('E34');e34={type:'ARRIVED',hex,reg:'N76ZA',label:'',locName:L?L.name:'East 34th St Heliport',locId:'E34',dist:0.26,callsign:'N76ZA',acType:'S76',alt:0,ts:1793389820910,inferred:true,synth:false};
+    const k=events.findIndex(e=>e.ts<e34.ts);events.splice(k<0?events.length:k,0,e34);}
+  const legs=await getLegs(env);
+  const drop=l=>l.hex===hex&&[1793389760421,1793377003255,1793377640555].includes(l.arr);
+  for(let i=legs.length-1;i>=0;i--)if(drop(legs[i]))legs.splice(i,1);
+  const add=[];if(w30D&&htoA&&!legs.find(l=>l.hex===hex&&l.arr===htoA.ts&&l.from==='W30'))add.push(legRecord(w30D,htoA));if(bdrD&&e34&&!legs.find(l=>l.hex===hex&&l.arr===e34.ts))add.push(legRecord(bdrD,e34));
+  for(const l of add){const k=legs.findIndex(x=>x.arr<l.arr);legs.splice(k<0?legs.length:k,0,l);}
+  await env.KV.put('legs',JSON.stringify(legs));
+  // strike the wrong Slack posts (found by text in the channel around the time they went out)
+  try{
+    const r=await fetch('https://slack.com/api/conversations.history?'+new URLSearchParams({channel:env.SLACK_CHANNEL_ID,oldest:String(1793376400),latest:String(1793390400),limit:'200'}),{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+    const j=await r.json();
+    for(const m of (j.messages||[])){
+      const tx=m.text||'';if(!/\*N76ZA\*/.test(tx)||/^~/.test(tx))continue;
+      if(/arrived at \*LaGuardia/.test(tx))await slackEdit(env,m.ts,'~*N76ZA* arrived at *LaGuardia (LGA)* — 3:49 PM~ · _corrected: one bad "on ground" reading while passing LaGuardia; it landed at East 34th St Heliport at 3:50 PM_');
+      else if(/departed \*LaGuardia/.test(tx))await slackEdit(env,m.ts,'~*N76ZA* departed *LaGuardia (LGA)* — 3:49 PM~ · _corrected: it never landed at LaGuardia_');
+      else if(/Westhampton Gabreski/.test(tx))await slackEdit(env,m.ts,'~'+tx.replace(/~/g,'')+'~ · _corrected: signal dropped while passing Westhampton; no stop there_');
+    }
+  }catch(e){}
+  await env.KV.put(FLAG,new Date().toISOString());
+}
+
+// Second pass for N76ZA 2026-10-30: the rebuilt East 34th arrival had produced a 1-min LGA->E34 leg; replace it with BDR->E34,
+// re-try any Slack post that still isn't struck through, and record what was done (readable at /fixlog).
+async function oneTimeFix2(env,events){
+  const FLAG='fix_2026-10-30_N76ZA_v2';
+  if(await env.KV.get(FLAG))return;
+  const hex='aa416f',rep={at:new Date().toISOString(),legsRemoved:0,legAdded:false,slackFound:0,slackStruck:0,slackEdited:0,slackError:null};
+  const legs=await getLegs(env);
+  for(let i=legs.length-1;i>=0;i--){const l=legs[i];if(l.hex===hex&&(l.from==='LGA'||l.to==='LGA'||l.from==='FOK'||l.to==='FOK')&&l.arr>1793370000000){legs.splice(i,1);rep.legsRemoved++;}}
+  const bdrD=events.find(e=>e.hex===hex&&e.type==='DEPARTED'&&e.locId==='BDR'&&e.ts===1793388702968);
+  const e34=events.find(e=>e.hex===hex&&e.type==='ARRIVED'&&e.locId==='E34'&&Math.abs(e.ts-1793389820910)<15*60e3);
+  if(bdrD&&e34&&!legs.find(l=>l.hex===hex&&l.arr===e34.ts)){const l=legRecord(bdrD,e34);const k=legs.findIndex(x=>x.arr<l.arr);legs.splice(k<0?legs.length:k,0,l);rep.legAdded=true;}
+  await env.KV.put('legs',JSON.stringify(legs));
+  try{
+    const r=await fetch('https://slack.com/api/conversations.history?'+new URLSearchParams({channel:env.SLACK_CHANNEL_ID,oldest:String(1793376400),latest:String(1793390400),limit:'200'}),{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+    const j=await r.json();if(!j.ok)rep.slackError=j.error||'history failed';
+    for(const m of (j.messages||[])){
+      const tx=m.text||'';if(!/\*N76ZA\*/.test(tx)||!/LaGuardia|Westhampton/.test(tx))continue;
+      rep.slackFound++;if(/^~/.test(tx)){rep.slackStruck++;continue;}
+      const why=/LaGuardia/.test(tx)?(/arrived/.test(tx)?'one bad "on ground" reading while passing LaGuardia; it landed at East 34th St Heliport at 3:50 PM':'it never landed at LaGuardia'):'signal dropped while passing Westhampton; no stop there';
+      if(await slackEdit(env,m.ts,'~'+tx.replace(/~/g,'')+'~ · _corrected: '+why+'_')){rep.slackEdited++;rep.slackStruck++;}
+    }
+  }catch(e){rep.slackError=String(e.message||e);}
+  await env.KV.put(FLAG,JSON.stringify(rep));
+}
+
+// Third pass: the two real N76ZA arrivals whose "from" was wrong were struck by mistake. Restore them with the right origin.
+async function oneTimeFix3(env){
+  const FLAG='fix_2026-10-30_N76ZA_v3';
+  if(await env.KV.get(FLAG))return;
+  const rep={at:new Date().toISOString(),restored:[],slackError:null};
+  const fixed={
+    'East Hampton':':large_green_circle: *N76ZA* arrived at *East Hampton (HTO)* — 12:27 PM from *West 30th St Heliport* · 1 h 19 min en route · _corrected: origin was West 30th, not Westhampton_',
+    'East 34th':':large_green_circle: *N76ZA* arrived at *East 34th St Heliport* — 3:50 PM from *Bridgeport Sikorsky (BDR)* · 19 min en route · _corrected: origin was Bridgeport, not LaGuardia; time estimated_'};
+  try{
+    const r=await fetch('https://slack.com/api/conversations.history?'+new URLSearchParams({channel:env.SLACK_CHANNEL_ID,oldest:String(1793376400),latest:String(1793390400),limit:'200'}),{headers:{'Authorization':'Bearer '+env.SLACK_BOT_TOKEN}});
+    const j=await r.json();if(!j.ok)rep.slackError=j.error||'history failed';
+    for(const m of (j.messages||[])){
+      const tx=m.text||'';if(!/\*N76ZA\*/.test(tx)||!/^~/.test(tx)||!/arrived at/.test(tx))continue;
+      for(const k of Object.keys(fixed))if(tx.includes('arrived at *'+k)&&await slackEdit(env,m.ts,fixed[k]))rep.restored.push(k);
+    }
+  }catch(e){rep.slackError=String(e.message||e);}
+  await env.KV.put(FLAG,JSON.stringify(rep));
+}
+
+// 2026-11-05: two estimated arrivals were wrongly withdrawn as pass-bys (quick stops). Restore them in the leg history,
+// the event log (N36HF only; N88ZA's day has rolled out of the log) and Slack. Runs once; report at /fixlog.
+async function oneTimeFix4(env,events){
+  const FLAG='fix_2026-11-05_withdrawals';if(await env.KV.get(FLAG))return;
+  const rep={at:new Date().toISOString(),legsSplit:0,eventsAdded:0,slackRestored:0,errors:[]};
+  const loc=id=>{const L=locById(id);return{locId:id,locName:L?L.name:id};};
+  const ev=(type,hex,reg,id,ts)=>({type,hex,reg,label:'',...loc(id),dist:0,callsign:reg,acType:'',alt:null,ts,inferred:true,synth:false});
+  const legs=await getLegs(env);
+  const split=(hex,reg,from,to,depTs,arrTs,via,viaArr,viaDep)=>{
+    const i=legs.findIndex(l=>l.hex===hex&&l.from===from&&l.to===to&&l.arr===arrTs);if(i<0){rep.errors.push('leg not found '+reg);return;}
+    const d=legs[i].dep;legs.splice(i,1,legRecord(ev('DEPARTED',hex,reg,via,viaDep),ev('ARRIVED',hex,reg,to,arrTs)),legRecord(ev('DEPARTED',hex,reg,from,d),ev('ARRIVED',hex,reg,via,viaArr)));rep.legsSplit++;
+  };
+  split('ac1dbc','N88ZA','E34','E34',1793396446668,1793397500434,'JFK',1793396820000,1793397060000);
+  const n36=legs.find(l=>l.reg==='N36HF'&&l.from==='N12'&&l.to==='29NY'&&l.arr===1793573863720);
+  if(n36){split(n36.hex,'N36HF','N12','29NY',n36.dep,1793573863720,'PHL',1793571180000,1793571360000);
+    for(const e of [ev('ARRIVED',n36.hex,'N36HF','PHL',1793571180000),ev('DEPARTED',n36.hex,'N36HF','PHL',1793571360000)]){
+      if(events.find(x=>x.hex===e.hex&&x.type===e.type&&x.locId==='PHL'&&Math.abs(x.ts-e.ts)<10*60e3))continue;
+      const k=events.findIndex(x=>x.ts<e.ts);events.splice(k<0?events.length:k,0,e);rep.eventsAdded++;}
+  }else rep.errors.push('N36HF leg not found');
+  await env.KV.put('legs',JSON.stringify(legs));
+  const fixes=[['1793396864.428829',':large_green_circle: *N88ZA* arrived at *JFK International* — 5:47 PM from *East 34th St Heliport* · 6 min en route · _estimated · restored: it did land (quick turn, back out about 5:51 PM)_'],
+               ['1793571208.225719',':large_green_circle: *N36HF* arrived at *Philadelphia (PHL)* — 5:13 PM from *Lakewood Airport (N12)* · 23 min en route · _estimated · restored: it most likely landed (back out about 5:16 PM)_']];
+  for(const [ts,text] of fixes){if(await slackEdit(env,ts,text))rep.slackRestored++;else rep.errors.push('slack edit failed '+ts);}
+  await env.KV.put(FLAG,JSON.stringify(rep));
+}
+
+// 2026-11-17: N92N stopped at Trenton before TTN was on the location list. Add the stop (estimated) to the log, the leg
+// history and Slack. Runs once; report at /fixlog.
+async function oneTimeFix5(env,events){
+  const FLAG='fix_2026-11-17_N92N_TTN';if(await env.KV.get(FLAG))return;
+  const hex='acbcfd',reg='N92N',ARR=1794941460000,DEP=1794943075000,rep={at:new Date().toISOString(),added:0,leg:false,slack:0,errors:[]};
+  const L=locById('TTN');if(!L){rep.errors.push('TTN not in location list yet');await env.KV.put(FLAG+'_wait',rep.at);return;} // try again next sweep
+  const mk=(type,ts)=>({type,hex,reg,label:'',locId:'TTN',locName:L.name,dist:0,callsign:reg,acType:'',alt:null,ts,inferred:true,synth:false});
+  const a=mk('ARRIVED',ARR),d=mk('DEPARTED',DEP);
+  for(const e of [a,d]){if(events.find(x=>x.hex===hex&&x.type===e.type&&x.locId==='TTN'&&Math.abs(x.ts-e.ts)<30*60e3))continue;const k=events.findIndex(x=>x.ts<e.ts);events.splice(k<0?events.length:k,0,e);rep.added++;}
+  const dep12=events.filter(x=>x.hex===hex&&x.type==='DEPARTED'&&x.ts<ARR).sort((x,y)=>y.ts-x.ts)[0];
+  const legs=await getLegs(env);
+  if(dep12&&!legs.find(l=>l.hex===hex&&l.arr===ARR)){const l=legRecord(dep12,a);const k=legs.findIndex(x=>x.arr<l.arr);legs.splice(k<0?legs.length:k,0,l);await env.KV.put('legs',JSON.stringify(legs));rep.leg=true;}
+  const from=dep12?` from *${dep12.locName}* · ${fmtDur(ARR-dep12.ts)} en route`:'';
+  for(const text of [`:large_green_circle: *${reg}* arrived at *${L.name}* — ${fmtTime(ARR)}${from} · _estimated · added late: Trenton was not on the location list yet_`,
+                     `:small_red_triangle: *${reg}* departed *${L.name}* — ${fmtTime(DEP)} · _estimated · added late: Trenton was not on the location list yet_`])
+    if(await slackSend(env,text))rep.slack++;else rep.errors.push('slack post failed');
+  await env.KV.put(FLAG,JSON.stringify(rep));
+}
+
 // ---- data ----
 async function fetchFeed(tails){
   const batch=tails.map(t=>t.hex).join(',').toUpperCase();
@@ -477,13 +865,15 @@ async function fetchFeed(tails){
   return null;
 }
 async function backfillTraces(state,now,tails){
-  const silent=tails.filter(t=>{const p=state[t.hex];return !p||(p.status!=='airborne'&&p.status!=='ground');});
+  // Only for tails the tracker has never seen. A tail it already knows keeps its own state (incl. 'went quiet in flight'),
+  // which a trace overwrite would erase.
+  const silent=tails.filter(t=>!state[t.hex]);
   await Promise.all(silent.map(async t=>{
     try{
       const r=await upstream(TRACE_BASE+t.hex.slice(-2)+'/trace_recent_'+t.hex+'.json',12000);
       if(!r.ok)return;const d=await r.json();const tr=d.trace||[];if(!tr.length)return;
       const last=tr[tr.length-1],ts=Math.round((d.timestamp+last[0])*1000),p=state[t.hex];
-      if(p&&p.lastSeen&&p.lastSeen>=ts)return;
+      if(state[t.hex])return;
       const lat=last[1],lon=last[2],alt=last[3]==='ground'?0:(typeof last[3]==='number'?last[3]:null);
       state[t.hex]={status:'nosignal',alt,alt_baro:last[3],lat,lon,nearest:snapNear(nearestLoc(lat,lon)),lastSeen:ts,ts:now,
         r:d.r||(p&&p.r)||'',t:d.t||(p&&p.t)||'',desc:d.desc||(p&&p.desc)||'',flight:'',fromTrace:true};
@@ -491,7 +881,7 @@ async function backfillTraces(state,now,tails){
   }));
 }
 
-async function sweep(env){
+async function sweep(env,pollSlack=true){
   const now=Date.now();
   const state=(await env.KV.get('state','json'))||{};
   const events=(await env.KV.get('events','json'))||[];
@@ -503,21 +893,10 @@ async function sweep(env){
   if(!fresh){await env.KV.put('health',JSON.stringify({...health,lastRun:now,ok:false,error:'feeds unavailable'}));return;}
   const byHex={};for(const a of fresh)byHex[a.hex]=a;
   const out=[];
-  for(const t of tails){
-    const ac=byHex[t.hex],prev=state[t.hex];
-    const status=ac?getStatus(ac):'stale';
-    if(ac&&status!=='stale'){
-      const alt=altOf(ac),near=snapNear(nearestLoc(ac.lat,ac.lon));
-      detectEvents(t,ac,prev,status,alt,near,now,events,out);
-      // Dwell tracking: which location the tail is (or was last) near, since when, and until when. Used to time reconstructed events.
-      const nearEv=nearForEvent(near)?near:null,pn=prev||{};
-      const dwell=nearEv?{nearLoc:nearEv,nearSince:(pn.nearLoc&&pn.nearLoc.id===nearEv.id&&pn.nearSince)?pn.nearSince:now,nearLast:now}
-                        :{nearLoc:pn.nearLoc||null,nearSince:pn.nearSince||null,nearLast:pn.nearLast||null};
-      state[t.hex]={...dwell,status,alt,alt_baro:ac.alt_baro,lat:ac.lat,lon:ac.lon,nearest:near,
-        lastSeen:now-Math.round((ac.seen_pos!=null?ac.seen_pos:(ac.seen||0))*1000),ts:now,track:typeof ac.track==='number'?ac.track:null,
-        r:ac.r||(prev&&prev.r)||'',t:ac.t||(prev&&prev.t)||'',desc:ac.desc||(prev&&prev.desc)||'',flight:(ac.flight||'').trim()};
-    }else handleLost(t,prev,now,events,out);
-  }
+  const wx=(await env.KV.get('wx_state','json'))||null;
+  for(const t of tails){const ns=stepTail(t,byHex[t.hex],state[t.hex],now,events,out,wx);if(ns)state[t.hex]=ns;}
+  await applyRetractions(env,events,out.retract);
+  await oneTimeFixes(env,events);
   let lastTrace=health.lastTrace||0;
   if(now-lastTrace>TRACE_EVERY_MS){await backfillTraces(state,now,tails);lastTrace=now;}
   let slackOk=health.slackOk;
@@ -532,9 +911,10 @@ async function sweep(env){
   await env.KV.put('state',JSON.stringify(state));
   await env.KV.put('events',JSON.stringify(events));
   await env.KV.put('health',JSON.stringify({lastRun:now,ok:true,live:fresh.length,lastTrace,slackOk,events:events.length,slackPollError:(await env.KV.get('slack_poll_error'))||null}));
-  try{await pollSlackChannel(env);}catch(e){await env.KV.put('slack_poll_error',String(e.message||e));}
+  // Slack reads are shared with five other BLADE bots on the same app: read each channel once a minute, not every sample.
+  if(pollSlack&&!(await slackBackingOff(env))){try{await pollSlackChannel(env);}catch(e){await env.KV.put('slack_poll_error',String(e.message||e));}}
   try{await wxSweep(env);}catch(e){console.error('wx sweep',e&&e.message);}
-  try{await pollChannel(env,env.WX_CHANNEL_ID,'wx_cursor',(ev)=>wxHandleMessage(env,ev));}catch(e){console.error('wx poll',e&&e.message);}
+  if(pollSlack&&!(await slackBackingOff(env))){try{await pollChannel(env,env.WX_CHANNEL_ID,'wx_cursor',(ev)=>wxHandleMessage(env,ev));}catch(e){console.error('wx poll',e&&e.message);}}
 }
 
 // ---- Slack ----
@@ -543,7 +923,7 @@ function fmtTime(ts){return new Date(ts).toLocaleTimeString('en-US',{hour:'numer
 function slackLine(e,leg){
   const arrow=e.type==='DEPARTED'?':small_red_triangle:':':large_green_circle:'; // red up-triangle = departed, green circle = arrived
   const verb=e.type==='DEPARTED'?'departed':'arrived at';
-  const note=e.synth?' · _estimated (leg reconstructed)_':e.inferred?' · _estimated from last tracked position_':'';
+  const note=e.route?' · _estimated from route: not tracked near there_':e.synth?' · _estimated (leg reconstructed)_':e.inferred?' · _estimated from last tracked position_':'';
   const cs=e.callsign&&e.callsign!==e.reg?' ('+e.callsign+')':'';
   const from=(e.type==='ARRIVED'&&leg)?` from *${leg.from.locName}* · ${fmtDur(leg.ete)} en route`+(leg.from.inferred&&!e.inferred?' _(departure time estimated)_':''):'';
   return `${arrow} *${e.reg}*${cs} ${verb} *${e.locName}* — ${fmtTime(e.ts)}${from}${note}`;
@@ -637,12 +1017,29 @@ async function postSlack(env,newEvents,allEvents){
     if(seen.includes(key))continue; // already in the channel: a repeat, not a new event
     seen.push(key);
     const ts=await slackSend(env,line);
-    if(ts===null)ok=false;
+    if(ts===null)ok=false;else if(typeof ts==='string')e.slackTs=ts;
   }
   return ok;
 }
+async function slackEdit(env,ts,text){
+  if(!env.SLACK_BOT_TOKEN||!env.SLACK_CHANNEL_ID||!ts)return false;
+  try{const r=await fetch('https://slack.com/api/chat.update',{method:'POST',headers:{'Content-Type':'application/json; charset=utf-8','Authorization':'Bearer '+env.SLACK_BOT_TOKEN},body:JSON.stringify({channel:env.SLACK_CHANNEL_ID,ts,text})});return (await r.json()).ok;}catch(e){return false;}
+}
+function struck(e,why){return `~*${e.reg}* ${e.type==='ARRIVED'?'arrived at':'departed'} *${e.locName}* — ${fmtTime(e.ts)}~ · _corrected: ${why}_`;}
+// Remove withdrawn events from the log and the leg history, and strike their Slack posts.
+async function applyRetractions(env,events,list){
+  if(!list||!list.length)return;
+  const legs=await getLegs(env);let legsChanged=false;
+  for(const r of list){
+    const i=events.findIndex(e=>e.hex===r.hex&&e.type==='ARRIVED'&&e.ts===r.ts&&(!r.locId||e.locId===r.locId));if(i<0)continue;
+    const [e]=events.splice(i,1);
+    const j=legs.findIndex(l=>l.hex===r.hex&&l.arr===r.ts&&(!r.locId||l.to===r.locId));if(j>=0){legs.splice(j,1);legsChanged=true;}
+    if(e.slackTs)await slackEdit(env,e.slackTs,struck(e,r.why||'it flew past without landing'));
+  }
+  if(legsChanged)await env.KV.put('legs',JSON.stringify(legs));
+}
 
-export {wxSummary,wxName,latestByStation,wxStatusText,verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus,buildLegs,recapFromLegs,periodRange,isIndirect};
+export {passedOver,inferStop,landingCandidate,touchdownLoc,flewThrough,flightStatus,stepTail,qnhFor,indAlt,aglAt,confirmDep,wxChangeLine,wxSummary,wxName,latestByStation,wxStatusText,verifySlack,nToHex,hexToN,resolveHex,parseCommand,describePos,describeTail,pushEvent,detectEvents,handleLost,legFor,legLine,getStatus,buildLegs,recapFromLegs,periodRange,isIndirect};
 
 // Ground Connect (blade-ground-connect): its own cron trigger never fired, so this worker's proven cron kicks its sweep twice a minute via a service binding.
 async function kickGroundConnect(env){
